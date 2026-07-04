@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "trader"
+version = "0.1.0"
+description = "A 24/7 Python swing trading bot with a premium web dashboard, powered by the Alpaca API."
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [{ include = "backend" }]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = ">=0.100.0"
+uvicorn = {version = ">=0.20.0", extras = ["standard"]}
+alpaca-py = ">=0.8.0"
+python-dotenv = ">=1.0.0"
+websockets = ">=11.0"
+pandas = ">=1.5.0"
+numpy = ">=1.20.0"
+requests = ">=2.28.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0"
+pytest-asyncio = ">=0.21"
+httpx = ">=0.24"     # async test client for FastAPI
+
+[tool.poetry.scripts]
+trader = "run:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

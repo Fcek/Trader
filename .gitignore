@@ -216,3 +216,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ── Trader Bot ──────────────────────────────────────────────────────────────
+# Never commit real credentials or the local database
+.env
+trader.db
+*.db
+
+# Poetry virtual environment (each dev creates their own via `poetry install`)
+.venv/
+
+# Compiled / cache artefacts
+__pycache__/
+*.py[cod]
