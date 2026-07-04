@@ -132,14 +132,14 @@ def valid_order_kwargs():
 
 
 def test_validate_order_approves_valid_order(rm, valid_order_kwargs):
-    with patch("backend.risk_manager.ALPACA_API_KEY", "real-key-abc"):
+    with patch("backend.config.ALPACA_API_KEY", "real-key-abc"):
         ok, reason = rm.validate_order(**valid_order_kwargs)
     assert ok is True
     assert reason == ""
 
 
 def test_validate_order_rejects_missing_api_key(rm, valid_order_kwargs):
-    with patch("backend.risk_manager.ALPACA_API_KEY", "your_alpaca_key_here"):
+    with patch("backend.config.ALPACA_API_KEY", "your_alpaca_key_here"):
         ok, reason = rm.validate_order(**valid_order_kwargs)
     assert ok is False
     assert "key" in reason.lower()
@@ -147,28 +147,28 @@ def test_validate_order_rejects_missing_api_key(rm, valid_order_kwargs):
 
 def test_validate_order_rejects_insufficient_cash(rm, valid_order_kwargs):
     """Order notional value (10 × $150 = $1 500) exceeds free_cash=$100."""
-    with patch("backend.risk_manager.ALPACA_API_KEY", "real-key"):
+    with patch("backend.config.ALPACA_API_KEY", "real-key"):
         ok, reason = rm.validate_order(**{**valid_order_kwargs, "free_cash": 100.0})
     assert ok is False
     assert "cash" in reason.lower()
 
 
 def test_validate_order_rejects_missing_stop_loss(rm, valid_order_kwargs):
-    with patch("backend.risk_manager.ALPACA_API_KEY", "real-key"):
+    with patch("backend.config.ALPACA_API_KEY", "real-key"):
         ok, reason = rm.validate_order(**{**valid_order_kwargs, "stop_loss_price": None})
     assert ok is False
     assert "stop-loss" in reason.lower()
 
 
 def test_validate_order_rejects_sl_above_entry(rm, valid_order_kwargs):
-    with patch("backend.risk_manager.ALPACA_API_KEY", "real-key"):
+    with patch("backend.config.ALPACA_API_KEY", "real-key"):
         ok, reason = rm.validate_order(**{**valid_order_kwargs, "stop_loss_price": 160.0})
     assert ok is False
     assert "below" in reason.lower()
 
 
 def test_validate_order_rejects_tp_below_entry(rm, valid_order_kwargs):
-    with patch("backend.risk_manager.ALPACA_API_KEY", "real-key"):
+    with patch("backend.config.ALPACA_API_KEY", "real-key"):
         ok, reason = rm.validate_order(**{**valid_order_kwargs, "take_profit_price": 140.0})
     assert ok is False
     assert "above" in reason.lower()
@@ -176,6 +176,6 @@ def test_validate_order_rejects_tp_below_entry(rm, valid_order_kwargs):
 
 def test_validate_order_accepts_none_take_profit(rm, valid_order_kwargs):
     """take_profit is optional — None should not trigger rejection."""
-    with patch("backend.risk_manager.ALPACA_API_KEY", "real-key"):
+    with patch("backend.config.ALPACA_API_KEY", "real-key"):
         ok, reason = rm.validate_order(**{**valid_order_kwargs, "take_profit_price": None})
     assert ok is True

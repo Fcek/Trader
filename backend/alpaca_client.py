@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
-import requests
+import httpx
 import websockets
 
 from backend.config import ALPACA_API_KEY, ALPACA_API_SECRET, ALPACA_PAPER_TRADING
@@ -42,19 +42,20 @@ class AlpacaClient:
 
     # ── REST helpers ──────────────────────────────────────────────────────────
 
-    def _request(
+    async def _request(
         self, method: str, path: str, payload: Optional[Dict] = None
     ) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
         try:
-            if method == "GET":
-                resp = requests.get(url, headers=self.headers, params=payload, timeout=10)
-            elif method == "POST":
-                resp = requests.post(url, headers=self.headers, json=payload, timeout=10)
-            elif method == "DELETE":
-                resp = requests.delete(url, headers=self.headers, timeout=10)
-            else:
-                raise ValueError(f"Unsupported method: {method}")
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                if method == "GET":
+                    resp = await client.get(url, headers=self.headers, params=payload)
+                elif method == "POST":
+                    resp = await client.post(url, headers=self.headers, json=payload)
+                elif method == "DELETE":
+                    resp = await client.delete(url, headers=self.headers)
+                else:
+                    raise ValueError(f"Unsupported method: {method}")
 
             if resp.status_code not in (200, 201, 204):
                 msg = f"Alpaca API {resp.status_code}: {resp.text}"
@@ -67,16 +68,16 @@ class AlpacaClient:
             raise
 
     async def get_account(self) -> Dict[str, Any]:
-        return await asyncio.to_thread(self._request, "GET", "/v2/account")
+        return await self._request("GET", "/v2/account")
 
     async def get_positions(self) -> List[Dict[str, Any]]:
-        return await asyncio.to_thread(self._request, "GET", "/v2/positions")
+        return await self._request("GET", "/v2/positions")
 
     async def get_orders(self, status: str = "open") -> List[Dict[str, Any]]:
-        return await asyncio.to_thread(self._request, "GET", "/v2/orders", {"status": status})
+        return await self._request("GET", "/v2/orders", {"status": status})
 
     async def cancel_order(self, order_id: str) -> None:
-        await asyncio.to_thread(self._request, "DELETE", f"/v2/orders/{order_id}")
+        await self._request("DELETE", f"/v2/orders/{order_id}")
         add_log("INFO", f"Cancelled order {order_id}")
 
     async def submit_order(
@@ -114,7 +115,7 @@ class AlpacaClient:
             + (f" TP={take_profit_price}" if take_profit_price else "")
         )
         add_log("INFO", msg)
-        return await asyncio.to_thread(self._request, "POST", "/v2/orders", payload)
+        return await self._request("POST", "/v2/orders", payload)
 
     # ── Market data ───────────────────────────────────────────────────────────
 
@@ -134,13 +135,12 @@ class AlpacaClient:
         }
 
         try:
-            resp = await asyncio.to_thread(
-                requests.get,
-                f"{self.data_url}/stocks/bars",
-                headers=self.headers,
-                params=params,
-                timeout=15,
-            )
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{self.data_url}/stocks/bars",
+                    headers=self.headers,
+                    params=params,
+                )
             if resp.status_code != 200:
                 add_log("ERROR", f"Market data error for {symbol}: {resp.text}")
                 return []

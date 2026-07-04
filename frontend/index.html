@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swing Trading Bot Dashboard</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="background-animation"></div>
+    
+    <div class="dashboard-container">
+        <header class="glass-panel main-header">
+            <div class="header-left">
+                <div class="status-indicator">
+                    <div class="pulse-ring" id="status-ring"></div>
+                    <div class="pulse-dot" id="status-dot"></div>
+                    <span id="status-text">Connecting...</span>
+                </div>
+                <h1>Trading Dashboard</h1>
+            </div>
+            <div class="header-right">
+                <div class="stat-box">
+                    <span class="label">Total Equity</span>
+                    <span class="value" id="equity-value">$0.00</span>
+                </div>
+                <div class="stat-box">
+                    <span class="label">Cash Balance</span>
+                    <span class="value" id="balance-value">$0.00</span>
+                </div>
+                <div class="stat-box">
+                    <span class="label">Unrealized PnL</span>
+                    <span class="value" id="unrealized-value">$0.00</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="dashboard-grid">
+            <!-- Chart Section -->
+            <section class="glass-panel chart-section">
+                <div class="section-header">
+                    <h2>Equity Curve</h2>
+                </div>
+                <div class="chart-container">
+                    <canvas id="equityChart"></canvas>
+                </div>
+            </section>
+
+            <!-- Open Positions Section -->
+            <section class="glass-panel positions-section">
+                <div class="section-header">
+                    <h2>Open Positions</h2>
+                </div>
+                <div class="table-container">
+                    <table class="glass-table">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th>Qty</th>
+                                <th>Entry</th>
+                                <th>SL</th>
+                                <th>TP</th>
+                                <th style="text-align: right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="positions-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Logs Section -->
+            <section class="glass-panel logs-section">
+                <div class="section-header">
+                    <h2>System Logs</h2>
+                </div>
+                <div class="logs-container" id="logs-container">
+                    <!-- Populated by JS -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

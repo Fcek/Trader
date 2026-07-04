@@ -208,13 +208,16 @@ class TradingBot:
         open_positions: set,
     ) -> None:
         """Evaluate one symbol and submit/skip as appropriate."""
-        # Fetch 200 daily bars (enough for EMA-200 calculation)
-        bars = await self.client.get_historical_bars(symbol, timeframe="1Day", limit=250)
-        if not bars:
+        # Fetch 250 daily bars (enough for EMA-200 calculation) + 1 for the current forming day
+        bars = await self.client.get_historical_bars(symbol, timeframe="1Day", limit=251)
+        if not bars or len(bars) < 2:
             add_log("WARNING", f"No market data for {symbol}, skipping.")
             return
+            
+        # Drop the current day's forming bar to prevent intraday repainting
+        closed_bars = bars[:-1]
 
-        result = self.strategy.generate_signal(bars)
+        result = self.strategy.generate_signal(closed_bars)
         signal = result["signal"]
         reason = result["reason"]
 
