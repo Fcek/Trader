@@ -134,7 +134,8 @@ class AlpacaClient:
     ) -> Dict[str, List[Dict[str, Any]]]:
         # For 1Hour timeframe, 250 bars requires ~39 trading days. We use limit // 4 (~62 calendar days) to be safe.
         days_back = limit * 2 if timeframe == "1Day" else max(limit // 4, 30)
-        start = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        from datetime import timezone
+        start = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         symbols_str = ",".join(symbols)
         params = {
