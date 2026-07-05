@@ -222,6 +222,7 @@ __marimo__/
 .env
 trader.db
 *.db
+*.db-journal
 
 # Poetry virtual environment (each dev creates their own via `poetry install`)
 .venv/
@@ -230,3 +231,4 @@ trader.db
 __pycache__/
 *.py[cod]
 trader.zip
+

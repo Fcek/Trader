@@ -45,6 +45,10 @@ class EMACrossStrategy(BaseStrategy):
         long_window: int = 21,
         trend_window: int = 200,
         atr_window: int = 14,
+        volume_window: int = 20,
+        volume_multiplier: float = 1.0,
+        rsi_window: int = 14,
+        rsi_max: float = 70.0,
         risk_multiplier: float = 2.0,
     ) -> None:
         super().__init__("EMA_Cross")
@@ -52,12 +56,20 @@ class EMACrossStrategy(BaseStrategy):
         self.long_window = long_window
         self.trend_window = trend_window
         self.atr_window = atr_window
+        self.volume_window = volume_window
+        self.volume_multiplier = volume_multiplier
+        self.rsi_window = rsi_window
+        self.rsi_max = rsi_max
         self.risk_multiplier = risk_multiplier
 
-    def generate_signal(self, bars: List[Dict[str, Any]]) -> Dict[str, Any]:
-        _hold = {"signal": "HOLD", "stop_loss": None, "take_profit": None, "reason": ""}
+    def generate_signal(
+        self,
+        bars: List[Dict[str, Any]],
+        market_bars: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        _hold = {"signal": "HOLD", "stop_loss": None, "trail_amount": None, "reason": ""}
 
-        min_bars = max(self.trend_window, self.long_window) + self.atr_window + 5
+        min_bars = max(self.trend_window, self.long_window, self.volume_window, self.rsi_window) + self.atr_window + 5
         if not bars or len(bars) < min_bars:
             _hold["reason"] = f"Insufficient data ({len(bars)} bars, need {min_bars})"
             return _hold
@@ -74,6 +86,14 @@ class EMACrossStrategy(BaseStrategy):
         df["ema_s"] = df["close"].ewm(span=self.short_window, adjust=False).mean()
         df["ema_l"] = df["close"].ewm(span=self.long_window,  adjust=False).mean()
         df["ema_t"] = df["close"].ewm(span=self.trend_window, adjust=False).mean()
+        df["vol_sma"] = df["volume"].rolling(window=self.volume_window).mean()
+
+        # RSI
+        delta = df["close"].diff()
+        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/self.rsi_window, adjust=False).mean()
+        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/self.rsi_window, adjust=False).mean()
+        rs = gain / loss
+        df["rsi"] = 100 - (100 / (1 + rs))
 
         # ATR
         hl  = df["high"] - df["low"]
@@ -92,17 +112,29 @@ class EMACrossStrategy(BaseStrategy):
         bullish_cross = (prev["ema_s"] <= prev["ema_l"]) and (last["ema_s"] > last["ema_l"])
         bearish_cross = (prev["ema_s"] >= prev["ema_l"]) and (last["ema_s"] < last["ema_l"])
         above_trend   = price > float(last["ema_t"])
+        high_volume   = float(last["volume"]) > (float(last["vol_sma"]) * self.volume_multiplier)
+        rsi_ok        = float(last["rsi"]) < self.rsi_max
 
-        if bullish_cross and above_trend:
-            sl = round(price - atr * self.risk_multiplier, 2)
-            tp = round(price + atr * self.risk_multiplier * 3, 2)
+        macro_ok = True
+        if market_bars and len(market_bars) >= self.trend_window:
+            mdf = pd.DataFrame(market_bars)
+            mdf = mdf.rename(columns={"c": "close"})
+            mdf["close"] = pd.to_numeric(mdf["close"])
+            mdf["ema_t"] = mdf["close"].ewm(span=self.trend_window, adjust=False).mean()
+            market_price = float(mdf.iloc[-1]["close"])
+            market_ema_t = float(mdf.iloc[-1]["ema_t"])
+            macro_ok = market_price > market_ema_t
+
+        if bullish_cross and above_trend and high_volume and rsi_ok and macro_ok:
+            trail_amount = round(atr * self.risk_multiplier, 2)
+            sl = round(price - trail_amount, 2)
             return {
                 "signal": "BUY",
                 "stop_loss": sl,
-                "take_profit": tp,
+                "trail_amount": trail_amount,
                 "reason": (
                     f"Bullish EMA{self.short_window}/{self.long_window} cross "
-                    f"above EMA{self.trend_window}. ATR SL={sl}, TP={tp}"
+                    f"above EMA{self.trend_window} with volume and RSI confirmation. ATR SL={sl}, Trail={trail_amount}"
                 ),
             }
 
@@ -110,7 +142,7 @@ class EMACrossStrategy(BaseStrategy):
             return {
                 "signal": "SELL",
                 "stop_loss": None,
-                "take_profit": None,
+                "trail_amount": None,
                 "reason": f"Bearish EMA{self.short_window}/{self.long_window} cross – exit signal.",
             }
 

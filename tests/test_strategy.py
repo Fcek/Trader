@@ -26,7 +26,7 @@ def make_bars(prices: List[float]) -> List[Dict[str, Any]]:
             "h": str(p * 1.005),
             "l": str(p * 0.995),
             "c": str(p),
-            "v": "1000000",
+            "v": str(1000000 + i * 10000),
         })
     return bars
 
@@ -99,7 +99,7 @@ def test_hold_requires_at_least_trend_window_bars():
 def test_signal_dict_has_required_keys():
     strat = EMACrossStrategy()
     result = strat.generate_signal(flat_bars())
-    for key in ("signal", "stop_loss", "take_profit", "reason"):
+    for key in ("signal", "stop_loss", "trail_amount", "reason"):
         assert key in result
 
 
@@ -111,18 +111,18 @@ def test_signal_value_is_valid_enum():
 
 # ── BUY signal ────────────────────────────────────────────────────────────────
 
-def test_buy_signal_has_stop_loss_and_take_profit():
-    """On a confirmed BUY, SL and TP must both be set."""
-    strat = EMACrossStrategy()
+def test_buy_signal_has_stop_loss_and_trail_amount():
+    """On a confirmed BUY, SL and trail_amount must both be set."""
+    strat = EMACrossStrategy(rsi_max=100.0)
     bars = bullish_cross_bars()
     result = strat.generate_signal(bars)
     if result["signal"] == "BUY":
         assert result["stop_loss"] is not None
-        assert result["take_profit"] is not None
+        assert result["trail_amount"] is not None
 
 
 def test_buy_stop_loss_below_take_profit():
-    strat = EMACrossStrategy()
+    strat = EMACrossStrategy(rsi_max=100.0)
     bars = bullish_cross_bars()
     result = strat.generate_signal(bars)
     if result["signal"] == "BUY":
@@ -130,27 +130,14 @@ def test_buy_stop_loss_below_take_profit():
 
 
 def test_buy_stop_loss_is_positive():
-    strat = EMACrossStrategy()
+    strat = EMACrossStrategy(rsi_max=100.0)
     bars = bullish_cross_bars()
     result = strat.generate_signal(bars)
     if result["signal"] == "BUY":
         assert result["stop_loss"] > 0
 
 
-def test_buy_take_profit_rrr_at_least_2_to_1():
-    """
-    The strategy uses risk_multiplier × 3 for TP and × 1 for SL, giving a
-    1:3 RRR. We only verify >= 2:1 to remain robust to edge-case price levels.
-    """
-    strat = EMACrossStrategy()
-    bars = bullish_cross_bars()
-    result = strat.generate_signal(bars)
-    if result["signal"] == "BUY":
-        price = float(bars[-1]["c"])
-        tp_dist = result["take_profit"] - price
-        sl_dist = price - result["stop_loss"]
-        if sl_dist > 0:
-            assert tp_dist / sl_dist >= 2.0
+
 
 
 # ── SELL signal ───────────────────────────────────────────────────────────────
@@ -163,14 +150,14 @@ def test_sell_signal_reason_is_non_empty():
         assert len(result["reason"]) > 0
 
 
-def test_sell_signal_has_no_sl_or_tp():
-    """A SELL exit signal doesn't carry SL/TP — those are managed by the broker's bracket."""
+def test_sell_signal_has_no_sl_or_trail_amount():
+    """A SELL exit signal doesn't carry SL/trail_amount — those are managed by the broker's bracket."""
     strat = EMACrossStrategy()
     bars = bearish_cross_bars()
     result = strat.generate_signal(bars)
     if result["signal"] == "SELL":
         assert result["stop_loss"] is None
-        assert result["take_profit"] is None
+        assert result["trail_amount"] is None
 
 
 # ── HOLD signal ───────────────────────────────────────────────────────────────

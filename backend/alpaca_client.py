@@ -90,6 +90,7 @@ class AlpacaClient:
         limit_price: Optional[float] = None,
         stop_loss_price: Optional[float] = None,
         take_profit_price: Optional[float] = None,
+        trail_price: Optional[float] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "symbol": symbol,
@@ -101,6 +102,9 @@ class AlpacaClient:
 
         if order_type == "limit" and limit_price:
             payload["limit_price"] = str(limit_price)
+            
+        if order_type == "trailing_stop" and trail_price:
+            payload["trail_price"] = str(trail_price)
 
         if stop_loss_price or take_profit_price:
             payload["order_class"] = "bracket"
@@ -122,11 +126,18 @@ class AlpacaClient:
     async def get_historical_bars(
         self, symbol: str, timeframe: str = "1Day", limit: int = 250
     ) -> List[Dict[str, Any]]:
+        bars_dict = await self.get_historical_bars_multi([symbol], timeframe, limit)
+        return bars_dict.get(symbol, [])
+
+    async def get_historical_bars_multi(
+        self, symbols: List[str], timeframe: str = "1Day", limit: int = 250
+    ) -> Dict[str, List[Dict[str, Any]]]:
         days_back = limit * 2 if timeframe == "1Day" else max(limit // 6, 30)
         start = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        symbols_str = ",".join(symbols)
         params = {
-            "symbols": symbol,
+            "symbols": symbols_str,
             "timeframe": timeframe,
             "start": start,
             "limit": limit,
@@ -142,12 +153,12 @@ class AlpacaClient:
                     params=params,
                 )
             if resp.status_code != 200:
-                add_log("ERROR", f"Market data error for {symbol}: {resp.text}")
-                return []
-            return resp.json().get("bars", {}).get(symbol, [])
+                add_log("ERROR", f"Market data error for {symbols_str}: {resp.text}")
+                return {}
+            return resp.json().get("bars", {})
         except Exception as exc:
-            add_log("ERROR", f"get_historical_bars({symbol}): {exc}")
-            return []
+            add_log("ERROR", f"get_historical_bars_multi({symbols_str}): {exc}")
+            return {}
 
     # ── WebSocket trade updates ───────────────────────────────────────────────
 

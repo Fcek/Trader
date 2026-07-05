@@ -190,24 +190,32 @@ class TradingBot:
         # Which symbols do we already hold a position in?
         open_positions = {p["symbol"] for p in await self._get_broker_positions()}
 
+        fetch_list = list(set(self.watchlist + ["QQQ"]))
+        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="1Hour", limit=251)
+
+        market_bars = bars_dict.get("QQQ", [])
+        if market_bars:
+            market_bars = market_bars[:-1]  # Drop forming day
+
         for symbol in self.watchlist:
             if not self.running:
                 break
             try:
-                await self._evaluate_symbol(symbol, equity, free_cash, open_positions)
+                bars = bars_dict.get(symbol, [])
+                await self._evaluate_symbol(symbol, bars, market_bars, equity, free_cash, open_positions)
             except Exception as e:
                 add_log("ERROR", f"Error evaluating {symbol}: {e}")
 
     async def _evaluate_symbol(
         self,
         symbol: str,
+        bars: List[Dict[str, Any]],
+        market_bars: List[Dict[str, Any]],
         equity: float,
         free_cash: float,
         open_positions: set,
     ) -> None:
         """Evaluate one symbol and submit/skip as appropriate."""
-        # Fetch 250 daily bars (enough for EMA-200 calculation) + 1 for the current forming day
-        bars = await self.client.get_historical_bars(symbol, timeframe="1Day", limit=251)
         if not bars or len(bars) < 2:
             add_log("WARNING", f"No market data for {symbol}, skipping.")
             return
@@ -215,14 +223,15 @@ class TradingBot:
         # Drop the current day's forming bar to prevent intraday repainting
         closed_bars = bars[:-1]
 
-        result = self.strategy.generate_signal(closed_bars)
+        result = self.strategy.generate_signal(closed_bars, market_bars)
         signal = result["signal"]
         reason = result["reason"]
 
         add_log("INFO", f"[{symbol}] Signal: {signal} – {reason}")
 
         if signal == "BUY" and symbol not in open_positions:
-            await self._open_position(symbol, result, equity, free_cash)
+            entry_price = float(bars[-1]["c"])
+            await self._open_position(symbol, result, equity, free_cash, entry_price)
 
         elif signal == "SELL" and symbol in open_positions:
             await self._close_position(symbol)
@@ -237,19 +246,16 @@ class TradingBot:
         signal_result: Dict[str, Any],
         equity: float,
         free_cash: float,
+        entry_price: float,
     ) -> None:
         """Submit a bracket BUY order for the given symbol."""
-        # Get the latest price
-        bars = await self.client.get_historical_bars(symbol, timeframe="1Day", limit=2)
-        if not bars:
-            return
-        entry_price = float(bars[-1]["c"])
 
         # Resolve SL / TP (strategy may provide dynamic values, fallback to config)
         stop_loss = signal_result.get("stop_loss")
-        take_profit = signal_result.get("take_profit")
-        if stop_loss is None or take_profit is None:
+        trail_amount = signal_result.get("trail_amount")
+        if stop_loss is None or trail_amount is None:
             stop_loss, take_profit = self.risk_manager.default_levels(entry_price)
+            trail_amount = float(take_profit) - entry_price
 
         # Calculate position size
         qty = self.risk_manager.calculate_position_size(entry_price, stop_loss, equity)
@@ -258,7 +264,7 @@ class TradingBot:
 
         # Final validation gate
         approved, rejection_reason = self.risk_manager.validate_order(
-            symbol, qty, entry_price, stop_loss, take_profit, free_cash
+            symbol, qty, entry_price, stop_loss, None, free_cash
         )
         if not approved:
             add_log("WARNING", f"Order rejected for {symbol}: {rejection_reason}")
@@ -272,8 +278,6 @@ class TradingBot:
                 side="buy",
                 order_type="market",
                 time_in_force="gtc",
-                stop_loss_price=stop_loss,
-                take_profit_price=take_profit,
             )
             order_id = order.get("id")
 
@@ -284,11 +288,11 @@ class TradingBot:
                 side="buy",
                 entry_price=entry_price,
                 stop_loss=stop_loss,
-                take_profit=take_profit,
+                take_profit=trail_amount,
                 order_id=order_id,
             )
 
-            msg = f"✅ BUY {qty} × {symbol} @ ~{entry_price} | SL: {stop_loss} | TP: {take_profit}"
+            msg = f"✅ BUY {qty} × {symbol} @ ~{entry_price} | SL: {stop_loss} | Trail: {trail_amount}"
             add_log("INFO", msg)
             await self._emit("trade_opened", {
                 "trade_id": trade_id,
@@ -296,7 +300,7 @@ class TradingBot:
                 "qty": qty,
                 "entry_price": entry_price,
                 "stop_loss": stop_loss,
-                "take_profit": take_profit,
+                "trail_amount": trail_amount,
             })
 
         except Exception as e:
@@ -336,6 +340,26 @@ class TradingBot:
             side = order.get("side", "?")
             add_log("INFO", f"🔔 Order FILLED: {side.upper()} {filled_qty} × {symbol} @ {filled_price}")
             await self._emit("position_update", await self._get_broker_positions())
+
+            if side.lower() == "buy":
+                from backend.database import get_db_connection
+                conn = get_db_connection()
+                trade = conn.execute("SELECT * FROM trades WHERE alpaca_entry_order_id = ?", (order_id,)).fetchone()
+                conn.close()
+                if trade and trade["take_profit"] is not None:
+                    trail_amount = trade["take_profit"]
+                    try:
+                        ts_order = await self.client.submit_order(
+                            symbol=symbol,
+                            qty=filled_qty,
+                            side="sell",
+                            order_type="trailing_stop",
+                            trail_price=trail_amount,
+                            time_in_force="gtc",
+                        )
+                        add_log("INFO", f"Placed Trailing Stop for {symbol} with trail amount ${trail_amount}")
+                    except Exception as e:
+                        add_log("ERROR", f"Failed to place Trailing Stop for {symbol}: {e}")
 
         elif ev_type in ("canceled", "expired"):
             add_log("WARNING", f"Order {order_id} for {symbol} was {ev_type}.")
