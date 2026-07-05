@@ -201,15 +201,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const equityHistory = await equityRes.json();
             
             if (equityHistory && equityHistory.length > 0) {
-                // Reverse to get chronological order (assuming API returns newest first)
-                equityHistory.reverse().forEach(record => {
+                // API already returns in ASC (chronological) order
+                equityHistory.forEach(record => {
                     equityChart.data.labels.push(record.timestamp);
                     equityChart.data.datasets[0].data.push(record.equity);
                 });
                 equityChart.update();
                 
                 const latest = equityHistory[equityHistory.length - 1];
-                updateHeaderStats(latest.equity, latest.cash_balance, latest.unrealized_pnl);
+                updateHeaderStats(latest.equity, latest.balance, latest.unrealized_pnl);
             }
 
             // Fetch positions

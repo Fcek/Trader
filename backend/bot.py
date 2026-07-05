@@ -28,11 +28,9 @@ from backend.database import (
 )
 from backend.risk_manager import RiskManager
 from backend.strategy import EMACrossStrategy
+from backend.config import WATCHLIST
 
 logger = logging.getLogger("bot")
-
-# Watchlist – symbols the bot is allowed to trade
-DEFAULT_WATCHLIST: List[str] = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOG"]
 
 # How often to run the strategy scan (seconds).
 # 3 600 = 1 hour.  Swing trading → daily bar evaluation is enough.
@@ -62,7 +60,7 @@ class TradingBot:
         self.client = AlpacaClient()
         self.strategy = EMACrossStrategy()
         self.risk_manager: Optional[RiskManager] = None
-        self.watchlist = watchlist or DEFAULT_WATCHLIST
+        self.watchlist = watchlist or WATCHLIST
         self.running = False
         self._listeners: List[Callable[[Dict[str, Any]], Any]] = []
         self._tasks: List[asyncio.Task] = []

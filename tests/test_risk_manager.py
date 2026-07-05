@@ -114,7 +114,7 @@ def test_default_levels_positive_rrr(rm):
     """Take-profit distance must be greater than stop-loss distance."""
     entry = 100.0
     sl, tp = rm.default_levels(entry)
-    assert (tp - entry) > (entry - sl)
+    assert (float(tp) - entry) > (entry - float(sl))
 
 
 # ── Order validation ──────────────────────────────────────────────────────────

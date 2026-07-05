@@ -202,6 +202,7 @@ body {
     flex-grow: 1;
     position: relative;
     width: 100%;
+    min-height: 0;
 }
 
 /* Tables */
@@ -284,16 +285,48 @@ body {
 /* Responsive */
 @media (max-width: 1024px) {
     .dashboard-grid {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto auto auto;
-        height: auto;
-        overflow-y: auto;
+        display: block; /* Disable grid entirely to prevent flex/grid blowouts */
     }
     
-    .chart-section { min-height: 400px; }
-    .positions-section { min-height: 300px; }
-    .logs-section { min-height: 300px; }
-    .dashboard-container { height: auto; }
+    .chart-section, .positions-section, .logs-section {
+        display: flex;
+        flex-direction: column;
+        margin-bottom: 24px;
+        width: 100%;
+    }
+
+    .chart-section { height: 400px; }
+    .chart-container { flex: 1 1 auto; height: 100%; position: relative; }
+    
+    .positions-section { height: 350px; }
+    .logs-section { height: 350px; }
+    
+    .dashboard-container { height: auto; overflow: visible; padding: 16px; display: block; }
+}
+
+@media (max-width: 768px) {
+    .main-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+    }
+    .header-right {
+        width: 100%;
+        justify-content: space-between;
+    }
+    .stat-box {
+        align-items: flex-start;
+    }
+    
+    .chart-section { height: 320px; }
+    .positions-section { height: 250px; }
+    .logs-section { height: 200px; }
+    
+    .logs-container { font-size: 11px; gap: 4px; }
+    .log-entry { padding: 4px 8px; }
+    
+    .glass-table { font-size: 12px; }
+    .glass-table th, .glass-table td { padding: 6px; }
 }
 
 /* Buttons */
