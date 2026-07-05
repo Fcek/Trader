@@ -76,15 +76,33 @@ def init_db() -> None:
 
 # ── Logging helpers ───────────────────────────────────────────────────────────
 
+import asyncio
+from datetime import timezone
+
+_log_callbacks = []
+
+def register_log_callback(cb) -> None:
+    _log_callbacks.append(cb)
+
 def add_log(level: str, message: str) -> None:
     try:
+        timestamp = datetime.now(timezone.utc).isoformat()
         conn = get_db_connection()
         conn.execute(
             "INSERT INTO system_logs (timestamp, level, message) VALUES (?, ?, ?)",
-            (datetime.now().isoformat(), level, message),
+            (timestamp, level, message),
         )
         conn.commit()
         conn.close()
+        
+        # Broadcast to any registered callbacks (like WebSockets)
+        log_data = {"level": level, "message": message, "timestamp": timestamp}
+        for cb in _log_callbacks:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(cb(log_data))
+            except RuntimeError:
+                pass # No running event loop
     except Exception as exc:
         print(f"[DB log error] {exc}")
 

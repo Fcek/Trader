@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from backend.bot import TradingBot
-from backend.database import get_open_trades, get_logs, get_equity_history
+from backend.database import get_open_trades, get_logs, get_equity_history, register_log_callback
 
 logger = logging.getLogger("api")
 
@@ -40,11 +40,16 @@ async def bot_event_listener(event: dict):
     """Callback for the TradingBot to send events to clients."""
     await manager.broadcast(json.dumps(event))
 
+async def db_log_listener(log_data: dict):
+    """Callback for database logs to send to clients."""
+    await manager.broadcast(json.dumps({"type": "log", "data": log_data}))
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up FastAPI and Trading Bot...")
     bot.add_listener(bot_event_listener)
+    register_log_callback(db_log_listener)
     asyncio.create_task(bot.start())
     yield
     # Shutdown

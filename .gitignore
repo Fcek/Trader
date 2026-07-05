@@ -229,3 +229,4 @@ trader.db
 # Compiled / cache artefacts
 __pycache__/
 *.py[cod]
+trader.zip

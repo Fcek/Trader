@@ -145,15 +145,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const timeStr = logData.timestamp ? formatDate(logData.timestamp) : formatDate(new Date().toISOString());
         
         div.innerHTML = `<span class="log-time">[${timeStr}]</span> ${logData.message}`;
-        logsContainer.appendChild(div);
+        logsContainer.prepend(div);
         
         // Keep only last 100 logs in DOM
         if (logsContainer.children.length > 100) {
-            logsContainer.removeChild(logsContainer.firstChild);
+            logsContainer.removeChild(logsContainer.lastChild);
         }
-        
-        // Auto scroll to bottom
-        logsContainer.scrollTop = logsContainer.scrollHeight;
     }
 
     // Close position handler
