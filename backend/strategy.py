@@ -4,10 +4,10 @@ strategy.py – Pluggable strategy system.
 Each strategy must inherit from BaseStrategy and implement generate_signal().
 The signal dict contract:
     {
-        "signal":      "BUY" | "SELL" | "HOLD",
-        "stop_loss":   float | None,
-        "take_profit": float | None,
-        "reason":      str,
+        "signal":       "BUY" | "SELL" | "HOLD",
+        "stop_loss":    float | None,
+        "trail_amount": float | None,
+        "reason":       str,
     }
 """
 
@@ -92,7 +92,8 @@ class EMACrossStrategy(BaseStrategy):
         delta = df["close"].diff()
         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/self.rsi_window, adjust=False).mean()
         loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/self.rsi_window, adjust=False).mean()
-        rs = gain / loss
+        # Replace 0 with a tiny number to prevent divide-by-zero warnings
+        rs = gain / loss.replace(0, 1e-10)
         df["rsi"] = 100 - (100 / (1 + rs))
 
         # ATR

@@ -33,8 +33,8 @@ from backend.config import WATCHLIST
 logger = logging.getLogger("bot")
 
 # How often to run the strategy scan (seconds).
-# 3 600 = 1 hour.  Swing trading → daily bar evaluation is enough.
-STRATEGY_INTERVAL_SECONDS: int = 3_600
+# 300 = 5 minutes.
+STRATEGY_INTERVAL_SECONDS: int = 300
 
 # How often to refresh account equity for the drawdown monitor (seconds).
 EQUITY_POLL_INTERVAL_SECONDS: int = 60
@@ -191,7 +191,7 @@ class TradingBot:
         open_positions = {p["symbol"] for p in await self._get_broker_positions()}
 
         fetch_list = list(set(self.watchlist + ["QQQ"]))
-        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="1Hour", limit=251)
+        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="5Min", limit=251)
 
         market_bars = bars_dict.get("QQQ", [])
         if market_bars:
