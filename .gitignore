@@ -231,4 +231,4 @@ trader.db
 __pycache__/
 *.py[cod]
 trader.zip
-
+.agents/

@@ -132,7 +132,8 @@ class AlpacaClient:
     async def get_historical_bars_multi(
         self, symbols: List[str], timeframe: str = "1Day", limit: int = 250
     ) -> Dict[str, List[Dict[str, Any]]]:
-        days_back = limit * 2 if timeframe == "1Day" else max(limit // 6, 30)
+        # For 1Hour timeframe, 250 bars requires ~39 trading days. We use limit // 4 (~62 calendar days) to be safe.
+        days_back = limit * 2 if timeframe == "1Day" else max(limit // 4, 30)
         start = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         symbols_str = ",".join(symbols)
@@ -140,25 +141,41 @@ class AlpacaClient:
             "symbols": symbols_str,
             "timeframe": timeframe,
             "start": start,
-            "limit": limit,
+            "limit": 10000,
             "adjustment": "all",
             "feed": "iex",   # IEX is available on paper; use "sip" on live
         }
 
+        all_bars = {}
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(
-                    f"{self.data_url}/stocks/bars",
-                    headers=self.headers,
-                    params=params,
-                )
-            if resp.status_code != 200:
-                add_log("ERROR", f"Market data error for {symbols_str}: {resp.text}")
-                return {}
-            return resp.json().get("bars", {})
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                while True:
+                    resp = await client.get(
+                        f"{self.data_url}/stocks/bars",
+                        headers=self.headers,
+                        params=params,
+                    )
+                    if resp.status_code != 200:
+                        add_log("ERROR", f"Market data error for {symbols_str}: {resp.text}")
+                        break
+                    
+                    data = resp.json()
+                    chunk = data.get("bars", {})
+                    for sym, bars in chunk.items():
+                        all_bars.setdefault(sym, []).extend(bars)
+                        
+                    page_token = data.get("next_page_token")
+                    if not page_token:
+                        break
+                    params["page_token"] = page_token
+
+            # Slice to 'limit' bars per symbol to match expected behavior
+            for sym in all_bars:
+                all_bars[sym] = all_bars[sym][-limit:]
+            return all_bars
         except Exception as exc:
             add_log("ERROR", f"get_historical_bars_multi({symbols_str}): {exc}")
-            return {}
+            return all_bars
 
     # ── WebSocket trade updates ───────────────────────────────────────────────
 
