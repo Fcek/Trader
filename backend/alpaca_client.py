@@ -121,6 +121,11 @@ class AlpacaClient:
         add_log("INFO", msg)
         return await self._request("POST", "/v2/orders", payload)
 
+    async def close_position(self, symbol: str) -> Dict[str, Any]:
+        """Close an entire position via Alpaca API."""
+        add_log("INFO", f"Closing entire position for {symbol}")
+        return await self._request("DELETE", f"/v2/positions/{symbol}")
+
     # ── Market data ───────────────────────────────────────────────────────────
 
     async def get_historical_bars(

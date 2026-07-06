@@ -241,7 +241,7 @@ class TradingBot:
         open_positions = {p["symbol"] for p in await self._get_broker_positions()}
 
         fetch_list = list(set(self.watchlist + ["QQQ"]))
-        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="5Min", limit=251)
+        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="1Hour", limit=251)
 
         market_bars = bars_dict.get("QQQ", [])
         if market_bars:
@@ -357,16 +357,10 @@ class TradingBot:
             add_log("ERROR", f"Failed to submit BUY order for {symbol}: {e}")
 
     async def _close_position(self, symbol: str) -> None:
-        """Submit a SELL market order to close an existing position."""
+        """Submit a request to close an existing position entirely."""
         try:
-            order = await self.client.submit_order(
-                symbol=symbol,
-                qty=1,               # Alpaca will close full position if qty > held
-                side="sell",
-                order_type="market",
-                time_in_force="day",
-            )
-            add_log("INFO", f"📤 Sent SELL signal for {symbol} (strategy exit).")
+            order = await self.client.close_position(symbol)
+            add_log("INFO", f"📤 Sent SELL signal for {symbol} (position closed).")
         except Exception as e:
             add_log("ERROR", f"Failed to close position for {symbol}: {e}")
 
