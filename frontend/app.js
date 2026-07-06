@@ -130,7 +130,9 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Handle different shapes (broker payload vs DB payload)
             const symbol = pos.symbol;
-            const side = (pos.side || 'BUY').toUpperCase();
+            let side = (pos.side || 'BUY').toUpperCase();
+            if (side === 'LONG') side = 'BUY';
+            if (side === 'SHORT') side = 'SELL';
             const sideClass = side === 'BUY' ? 'side-buy' : 'side-sell';
             const qty = parseFloat(pos.qty).toFixed(4);
             const entry = parseFloat(pos.avg_entry_price || pos.entry_price || 0);
@@ -138,6 +140,12 @@ document.addEventListener('DOMContentLoaded', () => {
             // Try to extract SL / TP if available
             const sl = pos.stop_loss ? formatCurrency(pos.stop_loss) : '-';
             const tp = pos.take_profit ? formatCurrency(pos.take_profit) : '-';
+
+            const availableQty = parseFloat(pos.available_qty);
+            const isClosing = availableQty === 0;
+            const actionButton = isClosing 
+                ? `<button class="close-btn" disabled>Closing...</button>`
+                : `<button class="close-btn" data-symbol="${symbol}">Close</button>`;
 
             tr.innerHTML = `
                 <td style="font-weight: 600;">${symbol}</td>
@@ -147,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${sl}</td>
                 <td>${tp}</td>
                 <td style="text-align: right;">
-                    <button class="close-btn" data-symbol="${symbol}">Close</button>
+                    ${actionButton}
                 </td>
             `;
             positionsBody.appendChild(tr);
