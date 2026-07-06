@@ -175,6 +175,17 @@ def test_update_trade_exit_closes_trade(temp_db):
     assert closed[0]["status"] == "CLOSED"
 
 
+def test_update_trade_stop_loss(temp_db):
+    from backend.database import init_db, add_trade, update_trade_stop_loss, get_open_trades
+    init_db()
+    tid = add_trade("NVDA", qty=1.0, side="buy", entry_price=500.0, stop_loss=450.0)
+    update_trade_stop_loss(tid, new_stop_loss=475.0)
+    
+    trades = get_open_trades()
+    assert len(trades) == 1
+    assert trades[0]["stop_loss"] == pytest.approx(475.0)
+
+
 def test_multiple_trades_tracked_independently(temp_db):
     from backend.database import init_db, add_trade, get_open_trades
     init_db()

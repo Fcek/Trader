@@ -76,7 +76,7 @@ async def test_open_position(bot):
         qty=10.0,
         side="buy",
         order_type="market",
-        time_in_force="gtc"
+        time_in_force="day"
     )
     
     trades = get_open_trades()

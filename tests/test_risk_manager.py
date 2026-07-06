@@ -21,22 +21,34 @@ def rm():
 
 def test_position_size_basic(rm):
     """Qty should equal (equity × risk%) / risk_per_share."""
-    qty = rm.calculate_position_size(entry_price=100.0, stop_loss_price=95.0, account_equity=10_000.0)
-    expected = (10_000.0 * MAX_RISK_PER_TRADE_PCT) / (100.0 - 95.0)
+    # With 10_000 equity, max position is 2000.
+    # At entry 100, max qty is 20.
+    # So if risk allows more, it gets capped. Let's make risk tighter so it's not capped.
+    # risk = 200. entry = 100, SL = 80 -> risk_per_share = 20 -> qty = 10 (not capped)
+    qty = rm.calculate_position_size(entry_price=100.0, stop_loss_price=80.0, account_equity=10_000.0)
+    expected = (10_000.0 * MAX_RISK_PER_TRADE_PCT) / (100.0 - 80.0)
     assert qty == pytest.approx(expected, rel=1e-4)
+
+
+def test_position_size_fractional_shares(rm):
+    """Test that fractional shares up to 4 decimal places are allowed."""
+    # Max allocation is 2000. 2000 / 33.33 = 60.006. Let's make SL wider so it's not capped.
+    qty = rm.calculate_position_size(entry_price=33.33, stop_loss_price=20.0, account_equity=10_000.0)
+    expected = (10_000.0 * MAX_RISK_PER_TRADE_PCT) / (33.33 - 20.0)
+    assert qty == round(float(expected), 4)
 
 
 def test_position_size_scales_with_equity(rm):
     """Larger equity → larger position size (proportional)."""
-    qty_small = rm.calculate_position_size(150.0, 145.0, 5_000.0)
-    qty_large = rm.calculate_position_size(150.0, 145.0, 10_000.0)
+    qty_small = rm.calculate_position_size(150.0, 120.0, 5_000.0)
+    qty_large = rm.calculate_position_size(150.0, 120.0, 10_000.0)
     assert qty_large == pytest.approx(qty_small * 2, rel=1e-4)
 
 
 def test_position_size_wider_stop_gives_smaller_qty(rm):
     """Wider stop-loss distance reduces position size."""
-    qty_tight = rm.calculate_position_size(100.0, stop_loss_price=98.0, account_equity=10_000.0)
-    qty_wide  = rm.calculate_position_size(100.0, stop_loss_price=90.0, account_equity=10_000.0)
+    qty_tight = rm.calculate_position_size(100.0, stop_loss_price=90.0, account_equity=10_000.0)
+    qty_wide  = rm.calculate_position_size(100.0, stop_loss_price=50.0, account_equity=10_000.0)
     assert qty_tight > qty_wide
 
 

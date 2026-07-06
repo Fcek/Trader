@@ -98,6 +98,7 @@ class TradingBot:
         self._tasks = [
             asyncio.create_task(self._equity_monitor_loop()),
             asyncio.create_task(self._strategy_loop()),
+            asyncio.create_task(self._software_stop_loss_loop()),
             asyncio.create_task(self.client.listen_trade_updates(self._on_trade_update)),
         ]
 
@@ -124,6 +125,55 @@ class TradingBot:
     # ------------------------------------------------------------------
     # Background loops
     # ------------------------------------------------------------------
+
+    async def _software_stop_loss_loop(self) -> None:
+        """Monitors and triggers soft stop-loss for fractional positions."""
+        from backend.database import get_open_trades, update_trade_stop_loss
+        while self.running:
+            try:
+                positions = await self._get_broker_positions()
+                open_trades = get_open_trades()
+                
+                broker_lookup = {p["symbol"]: p for p in positions}
+                
+                for trade in open_trades:
+                    symbol = trade["symbol"]
+                    if symbol not in broker_lookup:
+                        continue
+                        
+                    qty = float(trade["qty"])
+                    # Skip whole-number positions since they have an Alpaca SL attached
+                    if qty.is_integer():
+                        continue
+                        
+                    current_price = float(broker_lookup[symbol].get("current_price", 0))
+                    if current_price <= 0:
+                        continue
+                        
+                    stop_loss = trade.get("stop_loss")
+                    trail_amount = trade.get("take_profit")
+                    
+                    if stop_loss is None:
+                        continue
+                        
+                    # Check if we hit the stop loss
+                    if current_price <= stop_loss:
+                        add_log("WARNING", f"📉 Soft SL triggered for {symbol} at {current_price} (SL: {stop_loss}).")
+                        await self._close_position(symbol)
+                        continue
+                        
+                    # Evaluate trailing stop upward movement
+                    if trail_amount:
+                        new_sl = round(current_price - trail_amount, 2)
+                        if new_sl > stop_loss:
+                            update_trade_stop_loss(trade["id"], new_sl)
+                            trade["stop_loss"] = new_sl
+                            add_log("INFO", f"📈 Soft trailing stop raised for {symbol}: {stop_loss} -> {new_sl}")
+                            
+            except Exception as e:
+                add_log("ERROR", f"Software stop loss loop error: {e}")
+
+            await asyncio.sleep(60)
 
     async def _equity_monitor_loop(self) -> None:
         """Polls account equity every minute and triggers circuit-breaker."""
@@ -277,7 +327,7 @@ class TradingBot:
                 qty=qty,
                 side="buy",
                 order_type="market",
-                time_in_force="gtc",
+                time_in_force="day",
             )
             order_id = order.get("id")
 
@@ -314,7 +364,7 @@ class TradingBot:
                 qty=1,               # Alpaca will close full position if qty > held
                 side="sell",
                 order_type="market",
-                time_in_force="gtc",
+                time_in_force="day",
             )
             add_log("INFO", f"📤 Sent SELL signal for {symbol} (strategy exit).")
         except Exception as e:
@@ -348,18 +398,21 @@ class TradingBot:
                 conn.close()
                 if trade and trade["take_profit"] is not None:
                     trail_amount = trade["take_profit"]
-                    try:
-                        ts_order = await self.client.submit_order(
-                            symbol=symbol,
-                            qty=filled_qty,
-                            side="sell",
-                            order_type="trailing_stop",
-                            trail_price=trail_amount,
-                            time_in_force="gtc",
-                        )
-                        add_log("INFO", f"Placed Trailing Stop for {symbol} with trail amount ${trail_amount}")
-                    except Exception as e:
-                        add_log("ERROR", f"Failed to place Trailing Stop for {symbol}: {e}")
+                    if filled_qty.is_integer():
+                        try:
+                            ts_order = await self.client.submit_order(
+                                symbol=symbol,
+                                qty=filled_qty,
+                                side="sell",
+                                order_type="trailing_stop",
+                                trail_price=trail_amount,
+                                time_in_force="gtc",
+                            )
+                            add_log("INFO", f"Placed Trailing Stop for {symbol} with trail amount ${trail_amount}")
+                        except Exception as e:
+                            add_log("ERROR", f"Failed to place Trailing Stop for {symbol}: {e}")
+                    else:
+                        add_log("INFO", f"Fractional order for {symbol}; tracking stop-loss via software loop.")
 
         elif ev_type in ("canceled", "expired"):
             add_log("WARNING", f"Order {order_id} for {symbol} was {ev_type}.")

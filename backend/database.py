@@ -218,6 +218,16 @@ def update_trade_exit(trade_id: int, exit_price: float, pnl: float, order_id: st
     conn.close()
 
 
+def update_trade_stop_loss(trade_id: int, new_stop_loss: float) -> None:
+    conn = get_db_connection()
+    conn.execute(
+        "UPDATE trades SET stop_loss = ? WHERE id = ?",
+        (new_stop_loss, trade_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_open_trades():
     conn = get_db_connection()
     rows = conn.execute("SELECT * FROM trades WHERE status = 'OPEN'").fetchall()
