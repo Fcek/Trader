@@ -137,15 +137,28 @@ def save_equity_snapshot(balance: float, equity: float, unrealized_pnl: float) -
     conn.close()
 
 
-def get_equity_history(limit: int = 500):
+def get_equity_history(limit: int = 5000, timeframe: str = "ALL"):
     conn = get_db_connection()
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    if timeframe == "1D":
+        dt = now - timedelta(days=1)
+    elif timeframe == "1W":
+        dt = now - timedelta(days=7)
+    elif timeframe == "1M":
+        dt = now - timedelta(days=30)
+    else:
+        dt = datetime(1970, 1, 1)
+        
+    time_filter = dt.isoformat()
+    
     rows = conn.execute(
         "SELECT timestamp, balance, equity, unrealized_pnl"
-        " FROM equity_history ORDER BY timestamp ASC LIMIT ?",
-        (limit,),
+        " FROM equity_history WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
+        (time_filter, limit,),
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [dict(r) for r in reversed(rows)]
 
 
 # ── Bot state ─────────────────────────────────────────────────────────────────

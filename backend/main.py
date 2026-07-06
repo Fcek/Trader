@@ -85,8 +85,8 @@ async def get_logs_api(limit: int = 50):
     return get_logs(limit)
 
 @app.get("/api/equity")
-async def get_equity_api(limit: int = 100):
-    return get_equity_history(limit)
+async def get_equity_api(limit: int = 5000, timeframe: str = "ALL"):
+    return get_equity_history(limit, timeframe)
 
 # WebSocket Endpoint
 @app.websocket("/ws")

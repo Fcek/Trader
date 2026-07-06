@@ -8,7 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=3">
 </head>
 <body>
     <div class="background-animation"></div>
@@ -42,8 +42,14 @@
         <main class="dashboard-grid">
             <!-- Chart Section -->
             <section class="glass-panel chart-section">
-                <div class="section-header">
+                <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
                     <h2>Equity Curve</h2>
+                    <div class="timeframe-selector">
+                        <button class="tf-btn" data-tf="1D">1D</button>
+                        <button class="tf-btn" data-tf="1W">1W</button>
+                        <button class="tf-btn" data-tf="1M">1M</button>
+                        <button class="tf-btn active" data-tf="ALL">ALL</button>
+                    </div>
                 </div>
                 <div class="chart-container">
                     <canvas id="equityChart"></canvas>
@@ -87,6 +93,6 @@
         </main>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=2"></script>
 </body>
 </html>

@@ -50,7 +50,23 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             scales: {
                 x: {
-                    display: false // Hide x-axis labels for clean look
+                    display: true, // Show x-axis labels
+                    ticks: {
+                        color: '#94a3b8',
+                        maxTicksLimit: 10,
+                        callback: function(val, index) {
+                            // Extract just the HH:mm from the timestamp string
+                            const label = this.getLabelForValue(val);
+                            if (!label) return '';
+                            const d = new Date(label);
+                            return d.getHours().toString().padStart(2, '0') + ':' + 
+                                   d.getMinutes().toString().padStart(2, '0');
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.05)',
+                        drawBorder: false
+                    }
                 },
                 y: {
                     grid: {
@@ -172,12 +188,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    let currentMaxPoints = 5000;
+
     function appendChartData(timestamp, equity) {
         equityChart.data.labels.push(timestamp);
         equityChart.data.datasets[0].data.push(equity);
         
-        // Keep last 60 points for smooth scrolling chart (e.g. 1 hour if 1 min intervals)
-        if (equityChart.data.labels.length > 60) {
+        if (equityChart.data.labels.length > currentMaxPoints) {
             equityChart.data.labels.shift();
             equityChart.data.datasets[0].data.shift();
         }
@@ -185,20 +202,15 @@ document.addEventListener('DOMContentLoaded', () => {
         equityChart.update();
     }
 
-    // Initial Data Fetch
-    async function fetchInitialData() {
+    async function fetchEquityData(timeframe = 'ALL') {
         try {
-            // Check status
-            const statusRes = await fetch('/api/status');
-            const status = await statusRes.json();
-            setConnectionStatus(status.running);
-
-            // Fetch recent equity
-            const equityRes = await fetch('/api/equity');
+            const equityRes = await fetch(`/api/equity?timeframe=${timeframe}&limit=5000`);
             const equityHistory = await equityRes.json();
             
+            equityChart.data.labels = [];
+            equityChart.data.datasets[0].data = [];
+            
             if (equityHistory && equityHistory.length > 0) {
-                // API already returns in ASC (chronological) order
                 equityHistory.forEach(record => {
                     equityChart.data.labels.push(record.timestamp);
                     equityChart.data.datasets[0].data.push(record.equity);
@@ -208,6 +220,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 const latest = equityHistory[equityHistory.length - 1];
                 updateHeaderStats(latest.equity, latest.balance, latest.unrealized_pnl);
             }
+        } catch (e) {
+            console.error("Error fetching equity data:", e);
+        }
+    }
+
+    // Timeframe selector listeners
+    const tfButtons = document.querySelectorAll('.tf-btn');
+    tfButtons.forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            tfButtons.forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            const tf = e.target.dataset.tf;
+            await fetchEquityData(tf);
+        });
+    });
+
+    // Initial Data Fetch
+    async function fetchInitialData() {
+        try {
+            // Check status
+            const statusRes = await fetch('/api/status');
+            const status = await statusRes.json();
+            setConnectionStatus(status.running);
+
+            // Fetch recent equity using the new function
+            await fetchEquityData('ALL');
 
             // Fetch positions
             const posRes = await fetch('/api/positions');

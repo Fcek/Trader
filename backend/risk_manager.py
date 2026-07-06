@@ -91,7 +91,7 @@ class RiskManager:
         max_qty_by_allocation = max_notional_value / ep
 
         qty = min(qty_by_risk, max_qty_by_allocation)
-        qty = round(qty, 4)          # keep 4 d.p. for fractional shares
+        qty = int(qty)               # use integer shares to support GTC and trailing stops
 
         if qty <= Decimal('0'):
             add_log("WARNING", "Position size calculated as 0 – rejecting order.")
