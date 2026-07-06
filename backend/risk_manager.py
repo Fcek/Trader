@@ -83,16 +83,24 @@ class RiskManager:
         risk_amount = eq * Decimal(str(MAX_RISK_PER_TRADE_PCT))
         risk_per_share = ep - sl
 
-        qty = risk_amount / risk_per_share
+        qty_by_risk = risk_amount / risk_per_share
+
+        # Cap qty based on max position allocation to prevent going all-in
+        from backend.config import MAX_POSITION_SIZE_PCT
+        max_notional_value = eq * Decimal(str(MAX_POSITION_SIZE_PCT))
+        max_qty_by_allocation = max_notional_value / ep
+
+        qty = min(qty_by_risk, max_qty_by_allocation)
         qty = round(qty, 4)          # keep 4 d.p. for fractional shares
 
         if qty <= Decimal('0'):
             add_log("WARNING", "Position size calculated as 0 – rejecting order.")
             return None
 
+        capped_msg = " (Capped by max allocation limit)" if qty == round(max_qty_by_allocation, 4) else ""
         add_log(
             "INFO",
-            f"Position size: {qty} shares | Risk: ${risk_amount:.2f} | "
+            f"Position size: {qty} shares{capped_msg} | Risk: ${risk_amount:.2f} | "
             f"Entry: {entry_price} | SL: {stop_loss_price}",
         )
         return qty
