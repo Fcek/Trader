@@ -181,12 +181,22 @@ document.addEventListener('DOMContentLoaded', () => {
     positionsBody.addEventListener('click', async (e) => {
         if (e.target.classList.contains('close-btn')) {
             const symbol = e.target.dataset.symbol;
+            
+            const password = prompt(`Enter password to close position for ${symbol}:`);
+            if (!password) return;
+            
             if (confirm(`Are you sure you want to close the position for ${symbol}?`)) {
                 e.target.disabled = true;
                 e.target.textContent = 'Closing...';
                 try {
-                    const res = await fetch(`/api/positions/${symbol}/close`, { method: 'POST' });
-                    if (!res.ok) throw new Error('Network response was not ok');
+                    const res = await fetch(`/api/positions/${symbol}/close?password=${encodeURIComponent(password)}`, { method: 'POST' });
+                    if (!res.ok) {
+                        if (res.status === 403) {
+                            alert("Incorrect password.");
+                            throw new Error('Incorrect password');
+                        }
+                        throw new Error('Network response was not ok');
+                    }
                 } catch (err) {
                     console.error("Failed to close position", err);
                     e.target.disabled = false;

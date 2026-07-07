@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import List
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -76,7 +76,9 @@ async def get_positions():
     return get_open_trades()
 
 @app.post("/api/positions/{symbol}/close")
-async def close_position_endpoint(symbol: str):
+async def close_position_endpoint(symbol: str, password: str = ""):
+    if password != "wilcza1":
+        raise HTTPException(status_code=403, detail="Invalid password")
     await bot._close_position(symbol)
     return {"status": "success", "message": f"Close request sent for {symbol}"}
 

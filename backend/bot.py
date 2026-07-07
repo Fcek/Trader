@@ -226,8 +226,6 @@ class TradingBot:
 
     async def _evaluate_all_symbols(self) -> None:
         """Run the strategy on every symbol in the watchlist."""
-        add_log("INFO", f"📊 Running strategy scan on {len(self.watchlist)} symbols…")
-
         # Fetch current account state once
         try:
             account = await self.client.get_account()
@@ -247,14 +245,21 @@ class TradingBot:
         if market_bars:
             market_bars = market_bars[:-1]  # Drop forming day
 
+        scan_results = []
         for symbol in self.watchlist:
             if not self.running:
                 break
             try:
                 bars = bars_dict.get(symbol, [])
-                await self._evaluate_symbol(symbol, bars, market_bars, equity, free_cash, open_positions)
+                res = await self._evaluate_symbol(symbol, bars, market_bars, equity, free_cash, open_positions)
+                if res:
+                    scan_results.append(res)
             except Exception as e:
                 add_log("ERROR", f"Error evaluating {symbol}: {e}")
+                
+        if scan_results:
+            combined = ", ".join(scan_results)
+            add_log("INFO", f"📊 Scan complete: {combined}")
 
     async def _evaluate_symbol(
         self,
@@ -264,11 +269,10 @@ class TradingBot:
         equity: float,
         free_cash: float,
         open_positions: set,
-    ) -> None:
+    ) -> str:
         """Evaluate one symbol and submit/skip as appropriate."""
         if not bars or len(bars) < 2:
-            add_log("WARNING", f"No market data for {symbol}, skipping.")
-            return
+            return f"{symbol}: No Data"
             
         # Drop the current day's forming bar to prevent intraday repainting
         closed_bars = bars[:-1]
@@ -277,7 +281,7 @@ class TradingBot:
         signal = result["signal"]
         reason = result["reason"]
 
-        add_log("INFO", f"[{symbol}] Signal: {signal} – {reason}")
+        log_msg = f"{symbol}: {signal}"
 
         if signal == "BUY" and symbol not in open_positions:
             entry_price = float(bars[-1]["c"])
@@ -285,6 +289,8 @@ class TradingBot:
 
         elif signal == "SELL" and symbol in open_positions:
             await self._close_position(symbol)
+            
+        return log_msg
 
     # ------------------------------------------------------------------
     # Order management
