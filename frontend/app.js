@@ -247,12 +247,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const tfButtons = document.querySelectorAll('.tf-btn');
     tfButtons.forEach(btn => {
         btn.addEventListener('click', async (e) => {
-            tfButtons.forEach(b => b.classList.remove('active'));
+            // Don't trigger TF logic for the download button which uses the same class
+            if(e.target.id === 'download-logs-btn') return;
+            tfButtons.forEach(b => {
+                if(b.id !== 'download-logs-btn') b.classList.remove('active');
+            });
             e.target.classList.add('active');
             const tf = e.target.dataset.tf;
             await fetchEquityData(tf);
         });
     });
+
+    // Download logs logic
+    const downloadLogsBtn = document.getElementById('download-logs-btn');
+    const logDaysInput = document.getElementById('log-days-input');
+    if(downloadLogsBtn && logDaysInput) {
+        downloadLogsBtn.addEventListener('click', () => {
+            const days = parseInt(logDaysInput.value) || 7;
+            window.location.href = `/api/logs/download?days=${days}`;
+        });
+    }
 
     // Initial Data Fetch
     async function fetchInitialData() {

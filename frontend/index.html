@@ -3,12 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Swing Trading Bot Dashboard</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Trading Bot Dashboard</title>
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=3">
+    <link rel="stylesheet" href="/static/styles.css?v=4">
 </head>
 <body>
     <div class="background-animation"></div>
@@ -83,8 +86,13 @@
 
             <!-- Logs Section -->
             <section class="glass-panel logs-section">
-                <div class="section-header">
+                <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
                     <h2>System Logs</h2>
+                    <div class="log-download-controls" style="display: flex; gap: 8px; align-items: center;">
+                        <input type="number" id="log-days-input" value="7" min="1" style="width: 60px; padding: 4px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: #f0f0f5;" title="Days to download">
+                        <span style="color: #94a3b8; font-size: 0.9em;">Days</span>
+                        <button id="download-logs-btn" class="tf-btn" style="padding: 4px 12px;">Download</button>
+                    </div>
                 </div>
                 <div class="logs-container" id="logs-container">
                     <!-- Populated by JS -->
@@ -93,6 +101,6 @@
         </main>
     </div>
 
-    <script src="/static/app.js?v=3"></script>
+    <script src="/static/app.js?v=4"></script>
 </body>
 </html>

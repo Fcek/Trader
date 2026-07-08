@@ -10,7 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from backend.bot import TradingBot
-from backend.database import get_open_trades, get_logs, get_equity_history, register_log_callback
+from backend.database import get_open_trades, get_logs, get_equity_history, register_log_callback, get_logs_by_days
+from fastapi.responses import Response
 
 logger = logging.getLogger("api")
 
@@ -86,6 +87,62 @@ async def close_position_endpoint(symbol: str, password: str = ""):
 async def get_logs_api(limit: int = 50):
     return get_logs(limit)
 
+@app.get("/api/logs/download")
+async def download_logs_api(days: int = 7):
+    from datetime import datetime, timedelta, timezone
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+    
+    combined = []
+    
+    # 1. System logs
+    logs = get_logs_by_days(days)
+    for log in logs:
+        ts_str = log['timestamp']
+        try:
+            ts = datetime.fromisoformat(ts_str)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+        except ValueError:
+            ts = datetime.min.replace(tzinfo=timezone.utc)
+        combined.append({
+            "ts": ts,
+            "text": f"[{ts_str}] {log['level']}: {log['message']}"
+        })
+
+    # 2. Metrics logs
+    try:
+        with open("decision_metrics.log", "r") as f:
+            for line in f:
+                if line.startswith("["):
+                    ts_str = line[1:27]
+                    try:
+                        ts = datetime.fromisoformat(ts_str)
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        if ts >= cutoff_date:
+                            combined.append({
+                                "ts": ts,
+                                "text": line.strip()
+                            })
+                    except ValueError:
+                        pass
+    except FileNotFoundError:
+        pass
+
+    # Sort descending
+    combined.sort(key=lambda x: x["ts"], reverse=True)
+    text_lines = ["=== COMBINED SYSTEM & METRICS LOGS ==="]
+    text_lines.extend([item["text"] for item in combined])
+    
+    content = "\n".join(text_lines)
+    current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    filename = f"trader_logs_{days}days_{current_date}.txt"
+    return Response(
+        content=content,
+        media_type="text/plain",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 @app.get("/api/equity")
 async def get_equity_api(limit: int = 5000, timeframe: str = "ALL"):
     return get_equity_history(limit, timeframe)
@@ -108,4 +165,11 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 @app.get("/")
 async def serve_frontend():
-    return FileResponse("frontend/index.html")
+    return FileResponse(
+        "frontend/index.html",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        }
+    )

@@ -117,6 +117,18 @@ def get_logs(limit: int = 100):
     return [dict(r) for r in rows]
 
 
+def get_logs_by_days(days: int):
+    conn = get_db_connection()
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    rows = conn.execute(
+        "SELECT timestamp, level, message FROM system_logs WHERE timestamp >= ? ORDER BY timestamp DESC",
+        (cutoff,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def clear_logs() -> None:
     conn = get_db_connection()
     conn.execute("DELETE FROM system_logs")

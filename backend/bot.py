@@ -184,7 +184,13 @@ class TradingBot:
                 balance = float(account["cash"])
                 unrealized = float(account.get("unrealized_pl", 0))
 
-                save_equity_snapshot(balance, equity, unrealized)
+                from backend.database import get_open_trades
+                open_trades = get_open_trades()
+                # Alpaca paper trading glitch: positions disappear, equity drops to cash balance
+                if len(open_trades) > 0 and equity == balance:
+                    add_log("WARNING", "Ignoring invalid Alpaca equity snapshot (paper trading glitch).")
+                else:
+                    save_equity_snapshot(balance, equity, unrealized)
 
                 await self._emit("equity_update", {
                     "equity": equity,
@@ -280,8 +286,17 @@ class TradingBot:
         result = self.strategy.generate_signal(closed_bars, market_bars)
         signal = result["signal"]
         reason = result["reason"]
+        metrics = result.get("metrics")
 
         log_msg = f"{symbol}: {signal}"
+
+        if metrics:
+            metrics_str = ", ".join(f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}" for k, v in metrics.items())
+            try:
+                with open("decision_metrics.log", "a") as f:
+                    f.write(f"[{datetime.now(timezone.utc).isoformat()}] {symbol} | Signal: {signal} | Metrics: {metrics_str}\n")
+            except Exception as e:
+                logger.error(f"Failed to write metrics: {e}")
 
         if signal == "BUY" and symbol not in open_positions:
             entry_price = float(bars[-1]["c"])
@@ -413,6 +428,24 @@ class TradingBot:
                             add_log("ERROR", f"Failed to place Trailing Stop for {symbol}: {e}")
                     else:
                         add_log("INFO", f"Fractional order for {symbol}; tracking stop-loss via software loop.")
+            
+            elif side.lower() == "sell":
+                from backend.database import get_db_connection, update_trade_exit
+                conn = get_db_connection()
+                # We need to find the OPEN trade for this symbol to mark it closed
+                trade = conn.execute("SELECT * FROM trades WHERE symbol = ? AND status = 'OPEN'", (symbol,)).fetchone()
+                conn.close()
+                if trade:
+                    entry_price = float(trade["entry_price"])
+                    qty = float(trade["qty"])
+                    pnl = (filled_price - entry_price) * qty
+                    update_trade_exit(
+                        trade_id=trade["id"],
+                        exit_price=filled_price,
+                        pnl=pnl,
+                        order_id=order_id
+                    )
+                    add_log("INFO", f"Trade for {symbol} closed in DB. PnL: ${pnl:.2f}")
 
         elif ev_type in ("canceled", "expired"):
             add_log("WARNING", f"Order {order_id} for {symbol} was {ev_type}.")

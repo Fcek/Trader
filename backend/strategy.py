@@ -67,7 +67,7 @@ class EMACrossStrategy(BaseStrategy):
         bars: List[Dict[str, Any]],
         market_bars: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        _hold = {"signal": "HOLD", "stop_loss": None, "trail_amount": None, "reason": ""}
+        _hold = {"signal": "HOLD", "stop_loss": None, "trail_amount": None, "reason": "", "metrics": None}
 
         min_bars = max(self.trend_window, self.long_window, self.volume_window, self.rsi_window) + self.atr_window + 5
         if not bars or len(bars) < min_bars:
@@ -126,6 +126,18 @@ class EMACrossStrategy(BaseStrategy):
             market_ema_t = float(mdf.iloc[-1]["ema_t"])
             macro_ok = market_price > market_ema_t
 
+        metrics = {
+            "price": price,
+            "ema_s": float(last["ema_s"]),
+            "ema_l": float(last["ema_l"]),
+            "ema_t": float(last["ema_t"]),
+            "vol": float(last["volume"]),
+            "vol_sma": float(last["vol_sma"]),
+            "rsi": float(last["rsi"]),
+            "atr": atr,
+            "macro_ok": macro_ok
+        }
+
         if bullish_cross and above_trend and high_volume and rsi_ok and macro_ok:
             trail_amount = round(atr * self.risk_multiplier, 2)
             sl = round(price - trail_amount, 2)
@@ -137,6 +149,7 @@ class EMACrossStrategy(BaseStrategy):
                     f"Bullish EMA{self.short_window}/{self.long_window} cross "
                     f"above EMA{self.trend_window} with volume and RSI confirmation. ATR SL={sl}, Trail={trail_amount}"
                 ),
+                "metrics": metrics
             }
 
         if bearish_cross:
@@ -145,7 +158,9 @@ class EMACrossStrategy(BaseStrategy):
                 "stop_loss": None,
                 "trail_amount": None,
                 "reason": f"Bearish EMA{self.short_window}/{self.long_window} cross – exit signal.",
+                "metrics": metrics
             }
 
         _hold["reason"] = "No crossover – holding."
+        _hold["metrics"] = metrics
         return _hold
