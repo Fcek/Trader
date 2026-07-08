@@ -1,3 +1,7 @@
+import os
+import threading
+import urllib.request
+import json
 import sqlite3
 import logging
 from datetime import datetime
@@ -84,9 +88,29 @@ _log_callbacks = []
 def register_log_callback(cb) -> None:
     _log_callbacks.append(cb)
 
+def _send_discord_alert(msg: str) -> None:
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        return
+    def _post():
+        try:
+            req = urllib.request.Request(webhook_url, method="POST")
+            req.add_header("Content-Type", "application/json")
+            data = json.dumps({"content": msg}).encode("utf-8")
+            urllib.request.urlopen(req, data=data, timeout=5)
+        except Exception as e:
+            print(f"[Discord] Failed to send alert: {e}")
+    threading.Thread(target=_post, daemon=True).start()
+
 def add_log(level: str, message: str) -> None:
     try:
         timestamp = datetime.now(timezone.utc).isoformat()
+        
+        if level in ("ERROR", "CRITICAL"):
+            _send_discord_alert(f"🚨 **{level}** 🚨\n```\n{message}\n```")
+        elif "Order FILLED:" in message or "PnL:" in message or "Soft SL triggered" in message:
+            _send_discord_alert(f"🔔 **TRADE UPDATE** 🔔\n```\n{message}\n```")
+
         conn = get_db_connection()
         conn.execute(
             "INSERT INTO system_logs (timestamp, level, message) VALUES (?, ?, ?)",
