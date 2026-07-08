@@ -10,11 +10,17 @@ from backend.config import DB_FILE_PATH
 logger = logging.getLogger("db")
 
 
+db_lock = threading.Lock()
+_global_conn = None
+
 def get_db_connection() -> sqlite3.Connection:
-    """Returns a sqlite3 connection with Row factory enabled."""
-    conn = sqlite3.connect(str(DB_FILE_PATH), timeout=10.0)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Returns a thread-safe persistent sqlite3 connection."""
+    global _global_conn
+    if _global_conn is None:
+        _global_conn = sqlite3.connect(str(DB_FILE_PATH), timeout=20.0, check_same_thread=False)
+        _global_conn.execute('PRAGMA journal_mode=WAL;')
+        _global_conn.row_factory = sqlite3.Row
+    return _global_conn
 
 
 def init_db() -> None:
@@ -74,7 +80,6 @@ def init_db() -> None:
     cur.execute("INSERT OR IGNORE INTO bot_state (key, value) VALUES ('active_strategy', 'EMA_Cross')")
 
     conn.commit()
-    conn.close()
     logger.info(f"Database ready at {DB_FILE_PATH}")
 
 
@@ -117,8 +122,7 @@ def add_log(level: str, message: str) -> None:
             (timestamp, level, message),
         )
         conn.commit()
-        conn.close()
-        
+            
         # Broadcast to any registered callbacks (like WebSockets)
         log_data = {"level": level, "message": message, "timestamp": timestamp}
         for cb in _log_callbacks:
@@ -137,7 +141,6 @@ def get_logs(limit: int = 100):
         "SELECT id, timestamp, level, message FROM system_logs ORDER BY id DESC LIMIT ?",
         (limit,),
     ).fetchall()
-    conn.close()
     return [dict(r) for r in rows]
 
 
@@ -149,7 +152,6 @@ def get_logs_by_days(days: int):
         "SELECT timestamp, level, message FROM system_logs WHERE timestamp >= ? ORDER BY timestamp DESC",
         (cutoff,)
     ).fetchall()
-    conn.close()
     return [dict(r) for r in rows]
 
 
@@ -157,7 +159,6 @@ def clear_logs() -> None:
     conn = get_db_connection()
     conn.execute("DELETE FROM system_logs")
     conn.commit()
-    conn.close()
 
 
 # ── Equity snapshot ───────────────────────────────────────────────────────────
@@ -170,7 +171,6 @@ def save_equity_snapshot(balance: float, equity: float, unrealized_pnl: float) -
         (datetime.now().isoformat(), balance, equity, unrealized_pnl),
     )
     conn.commit()
-    conn.close()
 
 
 def get_equity_history(limit: int = 5000, timeframe: str = "ALL"):
@@ -193,7 +193,6 @@ def get_equity_history(limit: int = 5000, timeframe: str = "ALL"):
         " FROM equity_history WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
         (time_filter, limit,),
     ).fetchall()
-    conn.close()
     return [dict(r) for r in reversed(rows)]
 
 
@@ -202,7 +201,6 @@ def get_equity_history(limit: int = 5000, timeframe: str = "ALL"):
 def get_bot_state(key: str, default: str = None) -> str:
     conn = get_db_connection()
     row = conn.execute("SELECT value FROM bot_state WHERE key = ?", (key,)).fetchone()
-    conn.close()
     return row["value"] if row else default
 
 
@@ -212,7 +210,6 @@ def set_bot_state(key: str, value: str) -> None:
         "INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", (key, str(value))
     )
     conn.commit()
-    conn.close()
 
 
 # ── Trade CRUD ────────────────────────────────────────────────────────────────
@@ -237,7 +234,6 @@ def add_trade(
     )
     trade_id = cur.lastrowid
     conn.commit()
-    conn.close()
     return trade_id
 
 
@@ -251,7 +247,6 @@ def update_trade_exit(trade_id: int, exit_price: float, pnl: float, order_id: st
         (exit_price, datetime.now().isoformat(), pnl, order_id, trade_id),
     )
     conn.commit()
-    conn.close()
 
 
 def update_trade_stop_loss(trade_id: int, new_stop_loss: float) -> None:
@@ -261,13 +256,11 @@ def update_trade_stop_loss(trade_id: int, new_stop_loss: float) -> None:
         (new_stop_loss, trade_id),
     )
     conn.commit()
-    conn.close()
 
 
 def get_open_trades():
     conn = get_db_connection()
     rows = conn.execute("SELECT * FROM trades WHERE status = 'OPEN'").fetchall()
-    conn.close()
     return [dict(r) for r in rows]
 
 
@@ -277,5 +270,4 @@ def get_closed_trades(limit: int = 100):
         "SELECT * FROM trades WHERE status = 'CLOSED' ORDER BY exit_time DESC LIMIT ?",
         (limit,),
     ).fetchall()
-    conn.close()
     return [dict(r) for r in rows]

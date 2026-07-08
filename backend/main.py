@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from backend.config import ADMIN_PASSWORD
 from backend.bot import TradingBot
 from backend.database import get_open_trades, get_logs, get_equity_history, register_log_callback, get_logs_by_days
 from fastapi.responses import Response
@@ -78,7 +79,7 @@ async def get_positions():
 
 @app.post("/api/positions/{symbol}/close")
 async def close_position_endpoint(symbol: str, password: str = ""):
-    if password != "wilcza1":
+    if password != ADMIN_PASSWORD:
         raise HTTPException(status_code=403, detail="Invalid password")
     await bot._close_position(symbol)
     return {"status": "success", "message": f"Close request sent for {symbol}"}

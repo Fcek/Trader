@@ -3,13 +3,6 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from backend.bot import TradingBot
 from backend.database import init_db, get_open_trades, add_trade
 
-@pytest.fixture(autouse=True)
-def temp_db(tmp_path, monkeypatch):
-    db_file = tmp_path / "test_bot.db"
-    monkeypatch.setattr("backend.config.DB_FILE_PATH", db_file)
-    monkeypatch.setattr("backend.database.DB_FILE_PATH", db_file)
-    init_db()
-    yield db_file
 
 @pytest.fixture
 def bot():
@@ -33,7 +26,7 @@ async def test_evaluate_all_symbols(bot):
     bot.running = True
     
     # Mock _evaluate_symbol so it doesn't do real stuff
-    bot._evaluate_symbol = AsyncMock()
+    bot._evaluate_symbol = AsyncMock(return_value="Mocked Result")
     
     # Mock account
     bot.client.get_account.return_value = {"equity": "10000", "cash": "10000"}

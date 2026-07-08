@@ -30,6 +30,8 @@ else:
 # ── Master Recovery Code ──────────────────────────────────────────────────────
 # Required to authorize emergency operations (liquidate all, reset DB) via API.
 BOT_RECOVERY_CODE = os.getenv("BOT_RECOVERY_CODE", "9f7a8b3c-4d2e-4f1a-8c3b-5d6e7f8a9b0c")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "changeme")
 
 # ── Trading Safety Limits ─────────────────────────────────────────────────────
 MAX_DRAWDOWN_PCT       = 0.15   # Halt bot if daily equity drawdown exceeds 15%

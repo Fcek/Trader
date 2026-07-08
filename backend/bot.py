@@ -173,7 +173,7 @@ class TradingBot:
             except Exception as e:
                 add_log("ERROR", f"Software stop loss loop error: {e}")
 
-            await asyncio.sleep(60)
+            await asyncio.sleep(15)
 
     async def _equity_monitor_loop(self) -> None:
         """Polls account equity every minute and triggers circuit-breaker."""
@@ -245,7 +245,7 @@ class TradingBot:
         open_positions = {p["symbol"] for p in await self._get_broker_positions()}
 
         fetch_list = list(set(self.watchlist + ["QQQ"]))
-        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="1Hour", limit=251)
+        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="15Min", limit=251)
 
         market_bars = bars_dict.get("QQQ", [])
         if market_bars:

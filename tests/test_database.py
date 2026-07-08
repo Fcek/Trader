@@ -12,16 +12,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-@pytest.fixture(autouse=True)
-def temp_db(tmp_path, monkeypatch):
-    """
-    Redirect DB_FILE_PATH to a fresh temporary file for every test.
-    This ensures tests are fully isolated from each other and from production.
-    """
-    db_file = tmp_path / "test_trader.db"
-    monkeypatch.setattr("backend.config.DB_FILE_PATH", db_file)
-    monkeypatch.setattr("backend.database.DB_FILE_PATH", db_file)
-    yield db_file
 
 
 # ── init_db ──────────────────────────────────────────────────────────────────
@@ -38,7 +28,6 @@ def test_init_db_creates_all_tables(temp_db):
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()
     }
-    conn.close()
 
     assert "trades" in tables
     assert "equity_history" in tables

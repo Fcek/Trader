@@ -71,6 +71,12 @@ ALPACA_PAPER_TRADING=True   # Set to False only for live trading
 
 # Emergency / recovery code (keep this secret!)
 BOT_RECOVERY_CODE=change-me-to-a-long-random-string
+
+# API Security
+ADMIN_PASSWORD=change-me-to-a-strong-password
+
+# Alerts (Optional)
+DISCORD_WEBHOOK_URL=your_webhook_url
 ```
 
 ### 5 — Run the bot

@@ -3,13 +3,6 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from backend.bot import TradingBot
 from backend.database import add_trade, get_open_trades, get_bot_state, set_bot_state, init_db
 
-@pytest.fixture(autouse=True)
-def temp_db(tmp_path, monkeypatch):
-    db_file = tmp_path / "test_trader.db"
-    monkeypatch.setattr("backend.config.DB_FILE_PATH", db_file)
-    monkeypatch.setattr("backend.database.DB_FILE_PATH", db_file)
-    init_db()
-    yield db_file
 
 @pytest.fixture
 def bot():
