@@ -410,7 +410,6 @@ class TradingBot:
                 from backend.database import get_db_connection
                 conn = get_db_connection()
                 trade = conn.execute("SELECT * FROM trades WHERE alpaca_entry_order_id = ?", (order_id,)).fetchone()
-                conn.close()
                 if trade and trade["take_profit"] is not None:
                     trail_amount = trade["take_profit"]
                     if filled_qty.is_integer():
@@ -434,7 +433,6 @@ class TradingBot:
                 conn = get_db_connection()
                 # We need to find the OPEN trade for this symbol to mark it closed
                 trade = conn.execute("SELECT * FROM trades WHERE symbol = ? AND status = 'OPEN'", (symbol,)).fetchone()
-                conn.close()
                 if trade:
                     entry_price = float(trade["entry_price"])
                     qty = float(trade["qty"])
