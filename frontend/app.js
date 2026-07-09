@@ -136,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const sideClass = side === 'BUY' ? 'side-buy' : 'side-sell';
             const qty = parseFloat(pos.qty).toFixed(4);
             const entry = parseFloat(pos.avg_entry_price || pos.entry_price || 0);
+            const current = pos.current_price ? formatCurrency(parseFloat(pos.current_price)) : '-';
             
             // Try to extract SL / TP if available
             const sl = pos.stop_loss ? formatCurrency(pos.stop_loss) : '-';
@@ -152,6 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="${sideClass}">${side}</td>
                 <td>${qty}</td>
                 <td>${formatCurrency(entry)}</td>
+                <td>${current}</td>
                 <td>${sl}</td>
                 <td>${tp}</td>
                 <td style="text-align: right;">
