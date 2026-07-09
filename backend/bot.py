@@ -136,6 +136,7 @@ class TradingBot:
                 
                 broker_lookup = {p["symbol"]: p for p in positions}
                 
+                updated_sl = False
                 for trade in open_trades:
                     symbol = trade["symbol"]
                     if symbol not in broker_lookup:
@@ -169,6 +170,10 @@ class TradingBot:
                             update_trade_stop_loss(trade["id"], new_sl)
                             trade["stop_loss"] = new_sl
                             add_log("INFO", f"📈 Soft trailing stop raised for {symbol}: {stop_loss} -> {new_sl}")
+                            updated_sl = True
+                            
+                if updated_sl:
+                    await self._get_broker_positions()
                             
             except Exception as e:
                 add_log("ERROR", f"Software stop loss loop error: {e}")
@@ -511,7 +516,20 @@ class TradingBot:
         """Wrapper around AlpacaClient.get_positions with error handling."""
         try:
             positions = await self.client.get_positions()
-            await self._emit("position_update", positions)
+            
+            from backend.database import get_open_trades
+            db_trades = {t["symbol"]: t for t in get_open_trades()}
+            
+            enriched_positions = []
+            for p in positions:
+                enriched = dict(p)
+                db_t = db_trades.get(p["symbol"])
+                if db_t:
+                    enriched["stop_loss"] = db_t.get("stop_loss")
+                    enriched["take_profit"] = db_t.get("take_profit")
+                enriched_positions.append(enriched)
+                
+            await self._emit("position_update", enriched_positions)
             return positions
         except Exception as e:
             add_log("ERROR", f"Failed to fetch broker positions: {e}")

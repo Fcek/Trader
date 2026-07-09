@@ -101,6 +101,7 @@ def _send_discord_alert(msg: str) -> None:
         try:
             req = urllib.request.Request(webhook_url, method="POST")
             req.add_header("Content-Type", "application/json")
+            req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             data = json.dumps({"content": msg}).encode("utf-8")
             urllib.request.urlopen(req, data=data, timeout=5)
         except Exception as e:
