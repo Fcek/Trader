@@ -58,11 +58,16 @@ class AlpacaClient:
                     raise ValueError(f"Unsupported method: {method}")
 
             if resp.status_code not in (200, 201, 204):
+                if resp.status_code == 404 and method == "DELETE" and path.startswith("/v2/positions/"):
+                    add_log("INFO", f"Position already closed or not found on broker: {path}")
+                    return {}
                 msg = f"Alpaca API {resp.status_code}: {resp.text}"
                 add_log("ERROR", msg)
                 raise RuntimeError(msg)
 
             return {} if resp.status_code == 204 else resp.json()
+        except RuntimeError:
+            raise
         except Exception as exc:
             add_log("ERROR", f"HTTP {method} {path} failed: {exc}")
             raise
