@@ -49,7 +49,7 @@ async def test_evaluate_all_symbols(bot):
 
 @pytest.mark.asyncio
 async def test_open_position(bot):
-    """Ensure _open_position submits native market buy and persists trade."""
+    """Ensure _open_position submits native market buy with SL bracket and persists trade."""
     bot.risk_manager = MagicMock()
     bot.risk_manager.calculate_position_size = MagicMock(return_value=10.0)
     bot.risk_manager.validate_order = MagicMock(return_value=(True, ""))
@@ -59,7 +59,8 @@ async def test_open_position(bot):
     # Mock strategy signal output
     signal_result = {
         "stop_loss": 140.0,
-        "trail_amount": 2.5
+        "activation_price": 160.0,
+        "trail_amount": 10.0
     }
     
     await bot._open_position("AAPL", signal_result, 10000, 10000, 150.0)
@@ -69,20 +70,23 @@ async def test_open_position(bot):
         qty=10.0,
         side="buy",
         order_type="market",
-        time_in_force="day"
+        time_in_force="day",
+        stop_loss_price=140.0
     )
     
     trades = get_open_trades()
     assert len(trades) == 1
     assert trades[0]["symbol"] == "AAPL"
-    assert trades[0]["take_profit"] == 2.5  # stored trail_amount here
+    assert trades[0]["take_profit"] is None
+    assert trades[0]["activation_price"] == 160.0
+    assert trades[0]["trail_amount"] == 10.0
     assert trades[0]["alpaca_entry_order_id"] == "mock_order_123"
 
 @pytest.mark.asyncio
-async def test_on_trade_update_trailing_stop(bot):
-    """Ensure a BUY fill triggers the Trailing Stop sell order."""
+async def test_on_trade_update_buy_fill(bot):
+    """Ensure a BUY fill logs correctly and doesn't submit a trailing stop immediately."""
     # Insert open trade into DB simulating a submitted but unfilled buy
-    add_trade("AAPL", 10.0, "buy", 150.0, 140.0, 2.5, "mock_order_123")
+    add_trade("AAPL", 10.0, "buy", 150.0, stop_loss=140.0, activation_price=160.0, trail_amount=10.0, order_id="mock_order_123")
     
     event = {
         "event": "fill",
@@ -98,15 +102,6 @@ async def test_on_trade_update_trailing_stop(bot):
     bot._get_broker_positions = AsyncMock(return_value=[])
     bot._emit = AsyncMock()
     
-    bot.client.submit_order.return_value = {"id": "mock_ts_124"}
-    
     await bot._on_trade_update(event)
     
-    bot.client.submit_order.assert_called_once_with(
-        symbol="AAPL",
-        qty=10.0,
-        side="sell",
-        order_type="trailing_stop",
-        trail_price=2.5,
-        time_in_force="gtc"
-    )
+    bot.client.submit_order.assert_not_called()
