@@ -54,6 +54,8 @@ class AlpacaClient:
                     resp = await client.post(url, headers=self.headers, json=payload)
                 elif method == "DELETE":
                     resp = await client.delete(url, headers=self.headers)
+                elif method == "PATCH":
+                    resp = await client.patch(url, headers=self.headers, json=payload)
                 else:
                     raise ValueError(f"Unsupported method: {method}")
 
@@ -84,6 +86,11 @@ class AlpacaClient:
     async def cancel_order(self, order_id: str) -> None:
         await self._request("DELETE", f"/v2/orders/{order_id}")
         add_log("INFO", f"Cancelled order {order_id}")
+
+    async def replace_order(self, order_id: str, stop_price: float) -> Dict[str, Any]:
+        payload = {"stop_price": str(stop_price)}
+        add_log("INFO", f"Replacing order {order_id} with new SL {stop_price}")
+        return await self._request("PATCH", f"/v2/orders/{order_id}", payload=payload)
 
     async def submit_order(
         self,

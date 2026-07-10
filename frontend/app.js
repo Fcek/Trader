@@ -138,9 +138,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const entry = parseFloat(pos.avg_entry_price || pos.entry_price || 0);
             const current = pos.current_price ? formatCurrency(parseFloat(pos.current_price)) : '-';
             
-            // Try to extract SL / TP if available
+            // Try to extract SL / TP / Trail
             const sl = pos.stop_loss ? formatCurrency(pos.stop_loss) : '-';
-            const tp = pos.take_profit ? formatCurrency(pos.take_profit) : '-';
+            let tp = '-';
+            if (pos.take_profit) {
+                tp = formatCurrency(pos.take_profit);
+            } else if (pos.activation_price && pos.trail_amount) {
+                tp = `Act: ${formatCurrency(pos.activation_price)} | Tr: ${formatCurrency(pos.trail_amount)}`;
+            }
 
             const availableQty = parseFloat(pos.available_qty);
             const isClosing = availableQty === 0;

@@ -148,26 +148,42 @@ class TradingBot:
                         continue
                         
                     current_price = float(broker_lookup[symbol].get("current_price", 0))
-                    if current_price <= 0:
-                        continue
-                        
                     stop_loss = trade.get("stop_loss")
-                    take_profit = trade.get("take_profit")
+                    activation_price = trade.get("activation_price")
+                    trail_amount = trade.get("trail_amount")
+                    take_profit = trade.get("take_profit") # for legacy trades
                     
                     if stop_loss is None:
                         continue
                         
-                    # Check if we hit the stop loss
+                    # Check if we hit the hard stop loss
                     if current_price <= stop_loss:
                         add_log("WARNING", f"📉 Soft SL triggered for {symbol} at {current_price} (SL: {stop_loss}).")
                         await self._close_position(symbol)
                         continue
                         
-                    # Check if we hit the take profit
                     if take_profit and current_price >= take_profit:
                         add_log("INFO", f"🎯 Soft TP triggered for {symbol} at {current_price} (TP: {take_profit}).")
                         await self._close_position(symbol)
                         continue
+                        
+                    # Check trailing activation
+                    if activation_price and current_price >= activation_price and trail_amount:
+                        new_sl = round(current_price - trail_amount, 2)
+                        if new_sl > stop_loss:
+                            update_trade_stop_loss(trade["id"], new_sl)
+                            trade["stop_loss"] = new_sl
+                            add_log("INFO", f"📈 Trailing stop raised for {symbol}: {stop_loss} -> {new_sl}")
+                            updated_sl = True
+                            
+                            # Attempt to update native broker order
+                            try:
+                                orders = await self.client.get_orders(status="open")
+                                sl_order = next((o for o in orders if o["symbol"] == symbol and o["type"] == "stop"), None)
+                                if sl_order:
+                                    await self.client.replace_order(sl_order["id"], new_sl)
+                            except Exception as e:
+                                add_log("ERROR", f"Failed to replace native SL order for {symbol}: {e}")
                             
                 if updated_sl:
                     await self._get_broker_positions()
@@ -325,9 +341,12 @@ class TradingBot:
 
         # Resolve SL / TP (strategy may provide dynamic values, fallback to config)
         stop_loss = signal_result.get("stop_loss")
-        take_profit = signal_result.get("take_profit")
-        if stop_loss is None or take_profit is None:
-            stop_loss, take_profit = self.risk_manager.default_levels(entry_price)
+        activation_price = signal_result.get("activation_price")
+        trail_amount = signal_result.get("trail_amount")
+        if stop_loss is None or activation_price is None or trail_amount is None:
+            stop_loss, tp = self.risk_manager.default_levels(entry_price)
+            activation_price = entry_price + (entry_price - stop_loss) * 2
+            trail_amount = entry_price - stop_loss
 
         # Calculate position size
         qty = self.risk_manager.calculate_position_size(entry_price, stop_loss, equity)
@@ -336,7 +355,7 @@ class TradingBot:
 
         # Final validation gate
         approved, rejection_reason = self.risk_manager.validate_order(
-            symbol, qty, entry_price, stop_loss, take_profit, free_cash
+            symbol, qty, entry_price, stop_loss, activation_price, free_cash
         )
         if not approved:
             add_log("WARNING", f"Order rejected for {symbol}: {rejection_reason}")
@@ -352,7 +371,6 @@ class TradingBot:
                     order_type="market",
                     time_in_force="day",
                     stop_loss_price=stop_loss,
-                    take_profit_price=take_profit,
                 )
             else:
                 order = await self.client.submit_order(
@@ -371,11 +389,13 @@ class TradingBot:
                 side="buy",
                 entry_price=entry_price,
                 stop_loss=stop_loss,
-                take_profit=take_profit,
+                take_profit=None,
+                activation_price=activation_price,
+                trail_amount=trail_amount,
                 order_id=order_id,
             )
 
-            msg = f"✅ BUY {qty} × {symbol} @ ~{entry_price} | SL: {stop_loss} | TP: {take_profit}"
+            msg = f"✅ BUY {qty} × {symbol} @ ~{entry_price} | SL: {stop_loss} | Activate: {activation_price} | Trail: {trail_amount}"
             add_log("INFO", msg)
             await self._emit("trade_opened", {
                 "trade_id": trade_id,
@@ -383,7 +403,8 @@ class TradingBot:
                 "qty": qty,
                 "entry_price": entry_price,
                 "stop_loss": stop_loss,
-                "take_profit": take_profit,
+                "activation_price": activation_price,
+                "trail_amount": trail_amount,
             })
 
         except Exception as e:
@@ -420,9 +441,9 @@ class TradingBot:
 
             if side.lower() == "buy":
                 if filled_qty.is_integer():
-                    add_log("INFO", f"Integer order for {symbol}; bracket order automatically manages SL/TP.")
+                    add_log("INFO", f"Integer order for {symbol}; SL bracket order attached.")
                 else:
-                    add_log("INFO", f"Fractional order for {symbol}; tracking SL/TP via software loop.")
+                    add_log("INFO", f"Fractional order for {symbol}; tracking SL via software loop.")
             
             elif side.lower() == "sell":
                 from backend.database import get_db_connection, update_trade_exit
@@ -518,6 +539,8 @@ class TradingBot:
                 if db_t:
                     enriched["stop_loss"] = db_t.get("stop_loss")
                     enriched["take_profit"] = db_t.get("take_profit")
+                    enriched["activation_price"] = db_t.get("activation_price")
+                    enriched["trail_amount"] = db_t.get("trail_amount")
                 enriched_positions.append(enriched)
                 
             await self._emit("position_update", enriched_positions)

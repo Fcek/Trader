@@ -43,6 +43,8 @@ def init_db() -> None:
             pnl                     REAL    DEFAULT 0.0,
             stop_loss               REAL,
             take_profit             REAL,
+            activation_price        REAL,
+            trail_amount            REAL,
             alpaca_entry_order_id   TEXT,
             alpaca_exit_order_id    TEXT
         )
@@ -222,16 +224,18 @@ def add_trade(
     entry_price: float,
     stop_loss: float = None,
     take_profit: float = None,
+    activation_price: float = None,
+    trail_amount: float = None,
     order_id: str = None,
 ) -> int:
     conn = get_db_connection()
     cur = conn.execute(
         """INSERT INTO trades
                (symbol, qty, side, entry_price, entry_time, status,
-                stop_loss, take_profit, alpaca_entry_order_id)
-           VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)""",
+                stop_loss, take_profit, activation_price, trail_amount, alpaca_entry_order_id)
+           VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)""",
         (symbol, qty, side.lower(), entry_price, datetime.now().isoformat(),
-         stop_loss, take_profit, order_id),
+         stop_loss, take_profit, activation_price, trail_amount, order_id),
     )
     trade_id = cur.lastrowid
     conn.commit()
