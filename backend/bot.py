@@ -152,7 +152,7 @@ class TradingBot:
                         continue
                         
                     stop_loss = trade.get("stop_loss")
-                    trail_amount = trade.get("take_profit")
+                    take_profit = trade.get("take_profit")
                     
                     if stop_loss is None:
                         continue
@@ -163,14 +163,11 @@ class TradingBot:
                         await self._close_position(symbol)
                         continue
                         
-                    # Evaluate trailing stop upward movement
-                    if trail_amount:
-                        new_sl = round(current_price - trail_amount, 2)
-                        if new_sl > stop_loss:
-                            update_trade_stop_loss(trade["id"], new_sl)
-                            trade["stop_loss"] = new_sl
-                            add_log("INFO", f"📈 Soft trailing stop raised for {symbol}: {stop_loss} -> {new_sl}")
-                            updated_sl = True
+                    # Check if we hit the take profit
+                    if take_profit and current_price >= take_profit:
+                        add_log("INFO", f"🎯 Soft TP triggered for {symbol} at {current_price} (TP: {take_profit}).")
+                        await self._close_position(symbol)
+                        continue
                             
                 if updated_sl:
                     await self._get_broker_positions()
@@ -328,10 +325,9 @@ class TradingBot:
 
         # Resolve SL / TP (strategy may provide dynamic values, fallback to config)
         stop_loss = signal_result.get("stop_loss")
-        trail_amount = signal_result.get("trail_amount")
-        if stop_loss is None or trail_amount is None:
+        take_profit = signal_result.get("take_profit")
+        if stop_loss is None or take_profit is None:
             stop_loss, take_profit = self.risk_manager.default_levels(entry_price)
-            trail_amount = float(take_profit) - entry_price
 
         # Calculate position size
         qty = self.risk_manager.calculate_position_size(entry_price, stop_loss, equity)
@@ -340,7 +336,7 @@ class TradingBot:
 
         # Final validation gate
         approved, rejection_reason = self.risk_manager.validate_order(
-            symbol, qty, entry_price, stop_loss, None, free_cash
+            symbol, qty, entry_price, stop_loss, take_profit, free_cash
         )
         if not approved:
             add_log("WARNING", f"Order rejected for {symbol}: {rejection_reason}")
@@ -348,13 +344,24 @@ class TradingBot:
 
         # Submit to Alpaca
         try:
-            order = await self.client.submit_order(
-                symbol=symbol,
-                qty=qty,
-                side="buy",
-                order_type="market",
-                time_in_force="day",
-            )
+            if qty.is_integer():
+                order = await self.client.submit_order(
+                    symbol=symbol,
+                    qty=qty,
+                    side="buy",
+                    order_type="market",
+                    time_in_force="day",
+                    stop_loss_price=stop_loss,
+                    take_profit_price=take_profit,
+                )
+            else:
+                order = await self.client.submit_order(
+                    symbol=symbol,
+                    qty=qty,
+                    side="buy",
+                    order_type="market",
+                    time_in_force="day",
+                )
             order_id = order.get("id")
 
             # Persist trade in local DB
@@ -364,11 +371,11 @@ class TradingBot:
                 side="buy",
                 entry_price=entry_price,
                 stop_loss=stop_loss,
-                take_profit=trail_amount,
+                take_profit=take_profit,
                 order_id=order_id,
             )
 
-            msg = f"✅ BUY {qty} × {symbol} @ ~{entry_price} | SL: {stop_loss} | Trail: {trail_amount}"
+            msg = f"✅ BUY {qty} × {symbol} @ ~{entry_price} | SL: {stop_loss} | TP: {take_profit}"
             add_log("INFO", msg)
             await self._emit("trade_opened", {
                 "trade_id": trade_id,
@@ -376,7 +383,7 @@ class TradingBot:
                 "qty": qty,
                 "entry_price": entry_price,
                 "stop_loss": stop_loss,
-                "trail_amount": trail_amount,
+                "take_profit": take_profit,
             })
 
         except Exception as e:
@@ -412,26 +419,10 @@ class TradingBot:
             await self._emit("position_update", await self._get_broker_positions())
 
             if side.lower() == "buy":
-                from backend.database import get_db_connection
-                conn = get_db_connection()
-                trade = conn.execute("SELECT * FROM trades WHERE alpaca_entry_order_id = ?", (order_id,)).fetchone()
-                if trade and trade["take_profit"] is not None:
-                    trail_amount = trade["take_profit"]
-                    if filled_qty.is_integer():
-                        try:
-                            ts_order = await self.client.submit_order(
-                                symbol=symbol,
-                                qty=filled_qty,
-                                side="sell",
-                                order_type="trailing_stop",
-                                trail_price=trail_amount,
-                                time_in_force="gtc",
-                            )
-                            add_log("INFO", f"Placed Trailing Stop for {symbol} with trail amount ${trail_amount}")
-                        except Exception as e:
-                            add_log("ERROR", f"Failed to place Trailing Stop for {symbol}: {e}")
-                    else:
-                        add_log("INFO", f"Fractional order for {symbol}; tracking stop-loss via software loop.")
+                if filled_qty.is_integer():
+                    add_log("INFO", f"Integer order for {symbol}; bracket order automatically manages SL/TP.")
+                else:
+                    add_log("INFO", f"Fractional order for {symbol}; tracking SL/TP via software loop.")
             
             elif side.lower() == "sell":
                 from backend.database import get_db_connection, update_trade_exit

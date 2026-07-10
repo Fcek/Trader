@@ -6,7 +6,7 @@ The signal dict contract:
     {
         "signal":       "BUY" | "SELL" | "HOLD",
         "stop_loss":    float | None,
-        "trail_amount": float | None,
+        "take_profit":  float | None,
         "reason":       str,
     }
 """
@@ -67,7 +67,7 @@ class EMACrossStrategy(BaseStrategy):
         bars: List[Dict[str, Any]],
         market_bars: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        _hold = {"signal": "HOLD", "stop_loss": None, "trail_amount": None, "reason": "", "metrics": None}
+        _hold = {"signal": "HOLD", "stop_loss": None, "take_profit": None, "reason": "", "metrics": None}
 
         min_bars = max(self.trend_window, self.long_window, self.volume_window, self.rsi_window) + self.atr_window + 5
         if not bars or len(bars) < min_bars:
@@ -139,15 +139,16 @@ class EMACrossStrategy(BaseStrategy):
         }
 
         if bullish_cross and above_trend and high_volume and rsi_ok and macro_ok:
-            trail_amount = round(atr * self.risk_multiplier, 2)
-            sl = round(price - trail_amount, 2)
+            risk_amount = round(atr * self.risk_multiplier, 2)
+            sl = round(price - risk_amount, 2)
+            tp = round(price + (risk_amount * 3), 2)
             return {
                 "signal": "BUY",
                 "stop_loss": sl,
-                "trail_amount": trail_amount,
+                "take_profit": tp,
                 "reason": (
                     f"Bullish EMA{self.short_window}/{self.long_window} cross "
-                    f"above EMA{self.trend_window} with volume and RSI confirmation. ATR SL={sl}, Trail={trail_amount}"
+                    f"above EMA{self.trend_window} with volume and RSI confirmation. Risk={risk_amount}, SL={sl}, TP={tp}"
                 ),
                 "metrics": metrics
             }
@@ -156,7 +157,7 @@ class EMACrossStrategy(BaseStrategy):
             return {
                 "signal": "SELL",
                 "stop_loss": None,
-                "trail_amount": None,
+                "take_profit": None,
                 "reason": f"Bearish EMA{self.short_window}/{self.long_window} cross – exit signal.",
                 "metrics": metrics
             }
