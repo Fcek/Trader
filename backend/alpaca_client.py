@@ -39,6 +39,7 @@ class AlpacaClient:
             "APCA-API-SECRET-KEY": self.api_secret,
             "Content-Type": "application/json",
         }
+        self._session: Optional[httpx.AsyncClient] = None
 
     # ── REST helpers ──────────────────────────────────────────────────────────
 
@@ -46,18 +47,20 @@ class AlpacaClient:
         self, method: str, path: str, payload: Optional[Dict] = None
     ) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
+        if self._session is None:
+            self._session = httpx.AsyncClient(timeout=10.0)
+            
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                if method == "GET":
-                    resp = await client.get(url, headers=self.headers, params=payload)
-                elif method == "POST":
-                    resp = await client.post(url, headers=self.headers, json=payload)
-                elif method == "DELETE":
-                    resp = await client.delete(url, headers=self.headers)
-                elif method == "PATCH":
-                    resp = await client.patch(url, headers=self.headers, json=payload)
-                else:
-                    raise ValueError(f"Unsupported method: {method}")
+            if method == "GET":
+                resp = await self._session.get(url, headers=self.headers, params=payload)
+            elif method == "POST":
+                resp = await self._session.post(url, headers=self.headers, json=payload)
+            elif method == "DELETE":
+                resp = await self._session.delete(url, headers=self.headers)
+            elif method == "PATCH":
+                resp = await self._session.patch(url, headers=self.headers, json=payload)
+            else:
+                raise ValueError(f"Unsupported method: {method}")
 
             if resp.status_code not in (200, 201, 204):
                 if resp.status_code == 404 and method == "DELETE" and path.startswith("/v2/positions/"):
