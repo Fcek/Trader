@@ -56,7 +56,7 @@ class AlpacaClient:
             elif method == "POST":
                 resp = await self._session.post(url, headers=self.headers, json=payload)
             elif method == "DELETE":
-                resp = await self._session.delete(url, headers=self.headers)
+                resp = await self._session.delete(url, headers=self.headers, params=payload)
             elif method == "PATCH":
                 resp = await self._session.patch(url, headers=self.headers, json=payload)
             else:
@@ -139,7 +139,7 @@ class AlpacaClient:
     async def close_position(self, symbol: str) -> Dict[str, Any]:
         """Close an entire position via Alpaca API."""
         add_log("INFO", f"Closing entire position for {symbol}")
-        return await self._request("DELETE", f"/v2/positions/{symbol}")
+        return await self._request("DELETE", f"/v2/positions/{symbol}", payload={"cancel_orders": "true"})
 
     # ── Market data ───────────────────────────────────────────────────────────
 
