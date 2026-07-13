@@ -64,6 +64,7 @@ class TradingBot:
         self.running = False
         self._listeners: List[Callable[[Dict[str, Any]], Any]] = []
         self._tasks: List[asyncio.Task] = []
+        self._pending_closes: set[str] = set()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -136,10 +137,16 @@ class TradingBot:
                 
                 broker_lookup = {p["symbol"]: p for p in positions}
                 
+                # Cleanup pending closes if the position actually closed
+                self._pending_closes = {sym for sym in self._pending_closes if sym in broker_lookup}
+                
                 updated_sl = False
                 for trade in open_trades:
                     symbol = trade["symbol"]
                     if symbol not in broker_lookup:
+                        continue
+                        
+                    if symbol in self._pending_closes:
                         continue
                         
                     qty = float(trade["qty"])
@@ -414,6 +421,7 @@ class TradingBot:
         """Submit a request to close an existing position entirely."""
         try:
             order = await self.client.close_position(symbol)
+            self._pending_closes.add(symbol)
             add_log("INFO", f"📤 Sent SELL signal for {symbol} (position closed).")
         except Exception as e:
             add_log("ERROR", f"Failed to close position for {symbol}: {e}")
