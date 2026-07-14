@@ -10,7 +10,6 @@ from backend.config import DB_FILE_PATH
 logger = logging.getLogger("db")
 
 
-db_lock = threading.Lock()
 _global_conn = None
 
 def get_db_connection() -> sqlite3.Connection:
@@ -259,6 +258,16 @@ def update_trade_stop_loss(trade_id: int, new_stop_loss: float) -> None:
     conn.execute(
         "UPDATE trades SET stop_loss = ? WHERE id = ?",
         (new_stop_loss, trade_id),
+    )
+    conn.commit()
+
+
+def update_trade_entry_price(trade_id: int, entry_price: float) -> None:
+    """Update the entry price after an actual fill (replaces the estimate)."""
+    conn = get_db_connection()
+    conn.execute(
+        "UPDATE trades SET entry_price = ? WHERE id = ?",
+        (entry_price, trade_id),
     )
     conn.commit()
 

@@ -13,10 +13,12 @@ Responsibilities:
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from backend.alpaca_client import AlpacaClient
+from backend.config import WATCHLIST, BASE_DIR
 from backend.database import (
     add_log,
     add_trade,
@@ -24,11 +26,11 @@ from backend.database import (
     get_open_trades,
     save_equity_snapshot,
     set_bot_state,
+    update_trade_entry_price,
     update_trade_exit,
 )
 from backend.risk_manager import RiskManager
 from backend.strategy import EMACrossStrategy
-from backend.config import WATCHLIST
 
 logger = logging.getLogger("bot")
 
@@ -247,9 +249,21 @@ class TradingBot:
         """
         Evaluates the trading strategy for each symbol in the watchlist.
         Runs once immediately on startup, then every STRATEGY_INTERVAL_SECONDS.
+        Skips evaluation when the market is closed to save API calls.
         """
         while self.running:
             try:
+                # Check if market is open before scanning
+                try:
+                    clock = await self.client.get_clock()
+                    if not clock.get("is_open", False):
+                        next_open = clock.get("next_open", "unknown")
+                        add_log("INFO", f"⏸ Market closed. Next open: {next_open}. Skipping scan.")
+                        await asyncio.sleep(STRATEGY_INTERVAL_SECONDS)
+                        continue
+                except Exception as e:
+                    add_log("WARNING", f"Could not check market clock: {e}. Scanning anyway.")
+
                 await self._evaluate_all_symbols()
             except Exception as e:
                 add_log("ERROR", f"Strategy loop error: {e}")
@@ -323,7 +337,8 @@ class TradingBot:
         if metrics:
             metrics_str = ", ".join(f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}" for k, v in metrics.items())
             try:
-                with open("decision_metrics.log", "a") as f:
+                metrics_path = os.path.join(BASE_DIR, "decision_metrics.log")
+                with open(metrics_path, "a") as f:
                     f.write(f"[{datetime.now(timezone.utc).isoformat()}] {symbol} | Signal: {signal} | Metrics: {metrics_str}\n")
             except Exception as e:
                 logger.error(f"Failed to write metrics: {e}")
@@ -463,6 +478,17 @@ class TradingBot:
             await self._emit("position_update", await self._get_broker_positions())
 
             if side.lower() == "buy":
+                # Update DB with actual fill price (replaces the estimate)
+                from backend.database import get_db_connection
+                conn = get_db_connection()
+                trade = conn.execute(
+                    "SELECT * FROM trades WHERE symbol = ? AND status = 'OPEN' ORDER BY id DESC LIMIT 1",
+                    (symbol,)
+                ).fetchone()
+                if trade:
+                    update_trade_entry_price(trade["id"], filled_price)
+                    add_log("INFO", f"Updated {symbol} entry price to actual fill: {filled_price}")
+
                 if filled_qty.is_integer():
                     add_log("INFO", f"Integer order for {symbol}; SL bracket order attached.")
                 else:
@@ -529,14 +555,32 @@ class TradingBot:
             # 2. DB trades that no longer have a matching broker position
             for symbol, trade in db_symbols.items():
                 if symbol not in broker_symbols:
+                    # Try to recover actual exit price from Alpaca order history
+                    exit_price = 0.0
+                    pnl = 0.0
+                    try:
+                        orders = await self.client.get_closed_orders(symbol, limit=5)
+                        sell_order = next(
+                            (o for o in orders if o.get("side") == "sell" and o.get("status") == "filled"),
+                            None,
+                        )
+                        if sell_order:
+                            exit_price = float(sell_order.get("filled_avg_price", 0))
+                            entry_price = float(trade["entry_price"])
+                            qty = float(trade["qty"])
+                            pnl = (exit_price - entry_price) * qty
+                            add_log("INFO", f"Recovered exit price for {symbol}: ${exit_price:.2f}, PnL: ${pnl:.2f}")
+                    except Exception as e:
+                        add_log("WARNING", f"Could not recover exit price for {symbol}: {e}")
+
                     add_log(
                         "INFO",
                         f"Position for {symbol} no longer on broker – marking as CLOSED (SL/TP triggered).",
                     )
                     update_trade_exit(
                         trade_id=trade["id"],
-                        exit_price=0.0,
-                        pnl=0.0,
+                        exit_price=exit_price,
+                        pnl=pnl,
                         order_id="CLOSED_WHILE_OFFLINE",
                     )
 
@@ -567,7 +611,7 @@ class TradingBot:
                 enriched_positions.append(enriched)
                 
             await self._emit("position_update", enriched_positions)
-            return positions
+            return enriched_positions
         except Exception as e:
             add_log("ERROR", f"Failed to fetch broker positions: {e}")
             return []

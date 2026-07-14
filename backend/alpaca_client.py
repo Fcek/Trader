@@ -86,6 +86,19 @@ class AlpacaClient:
     async def get_orders(self, status: str = "open") -> List[Dict[str, Any]]:
         return await self._request("GET", "/v2/orders", {"status": status})
 
+    async def get_clock(self) -> Dict[str, Any]:
+        """Get market clock (is_open, next_open, next_close)."""
+        return await self._request("GET", "/v2/clock")
+
+    async def get_closed_orders(self, symbol: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Get recent closed/filled orders for a symbol (for reconciliation)."""
+        return await self._request("GET", "/v2/orders", {
+            "status": "closed",
+            "symbols": symbol,
+            "limit": str(limit),
+            "direction": "desc",
+        })
+
     async def cancel_order(self, order_id: str) -> None:
         await self._request("DELETE", f"/v2/orders/{order_id}")
         add_log("INFO", f"Cancelled order {order_id}")
