@@ -33,11 +33,15 @@ from backend.config import WATCHLIST
 logger = logging.getLogger("bot")
 
 # How often to run the strategy scan (seconds).
-# 300 = 5 minutes.
-STRATEGY_INTERVAL_SECONDS: int = 300
+# 600 = 10 minutes — enough to catch new 1-hour bar closes promptly.
+STRATEGY_INTERVAL_SECONDS: int = 600
 
 # How often to refresh account equity for the drawdown monitor (seconds).
 EQUITY_POLL_INTERVAL_SECONDS: int = 60
+
+# Cooldown period (hours) before re-entering a symbol after exit.
+# Prevents whipsaw re-entries on EMA crossover strategies.
+COOLDOWN_HOURS: int = 24
 
 
 class TradingBot:
@@ -65,6 +69,7 @@ class TradingBot:
         self._listeners: List[Callable[[Dict[str, Any]], Any]] = []
         self._tasks: List[asyncio.Task] = []
         self._pending_closes: set[str] = set()
+        self._cooldowns: Dict[str, datetime] = {}  # symbol -> last exit time
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -270,7 +275,7 @@ class TradingBot:
         open_positions = {p["symbol"] for p in await self._get_broker_positions()}
 
         fetch_list = list(set(self.watchlist + ["QQQ"]))
-        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="15Min", limit=251)
+        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="1Hour", limit=251)
 
         market_bars = bars_dict.get("QQQ", [])
         if market_bars:
@@ -324,6 +329,15 @@ class TradingBot:
                 logger.error(f"Failed to write metrics: {e}")
 
         if signal == "BUY" and symbol not in open_positions:
+            # Check re-entry cooldown to prevent whipsaw
+            if symbol in self._cooldowns:
+                cooldown_until = self._cooldowns[symbol] + timedelta(hours=COOLDOWN_HOURS)
+                if datetime.now(timezone.utc) < cooldown_until:
+                    remaining = (cooldown_until - datetime.now(timezone.utc)).total_seconds() / 3600
+                    log_msg += f" (cooldown {remaining:.1f}h remaining)"
+                    return log_msg
+                del self._cooldowns[symbol]
+
             entry_price = float(bars[-1]["c"])
             await self._open_position(symbol, result, equity, free_cash, entry_price)
 
@@ -422,7 +436,8 @@ class TradingBot:
         try:
             order = await self.client.close_position(symbol)
             self._pending_closes.add(symbol)
-            add_log("INFO", f"📤 Sent SELL signal for {symbol} (position closed).")
+            self._cooldowns[symbol] = datetime.now(timezone.utc)
+            add_log("INFO", f"📤 Sent SELL signal for {symbol} (position closed, {COOLDOWN_HOURS}h cooldown started).")
         except Exception as e:
             add_log("ERROR", f"Failed to close position for {symbol}: {e}")
 

@@ -93,7 +93,7 @@ class RiskManager:
         qty = min(qty_by_risk, max_qty_by_allocation)
         qty = round(float(qty), 4)
 
-        if qty <= Decimal('0'):
+        if qty <= 0:
             add_log("WARNING", "Position size calculated as 0 – rejecting order.")
             return None
 

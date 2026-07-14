@@ -152,8 +152,15 @@ class AlpacaClient:
     async def get_historical_bars_multi(
         self, symbols: List[str], timeframe: str = "1Day", limit: int = 250
     ) -> Dict[str, List[Dict[str, Any]]]:
-        # For 1Hour timeframe, 250 bars requires ~39 trading days. We use limit // 4 (~62 calendar days) to be safe.
-        days_back = limit * 2 if timeframe == "1Day" else max(limit // 4, 30)
+        # Calculate how far back to look based on timeframe and limit.
+        # Trading day ≈ 6.5 regular-session hours, 26 × 15-min bars.
+        # We multiply by 1.5 for safety (weekends, holidays, gaps).
+        if timeframe == "1Day":
+            days_back = limit * 2
+        elif timeframe in ("1Hour", "1H"):
+            days_back = max(int(limit / 6.5 * 1.5), 60)
+        else:  # 15Min, 5Min, etc.
+            days_back = max(limit // 4, 30)
         from datetime import timezone
         start = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
