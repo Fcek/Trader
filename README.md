@@ -75,6 +75,10 @@ BOT_RECOVERY_CODE=change-me-to-a-long-random-string
 # API Security
 ADMIN_PASSWORD=change-me-to-a-strong-password
 
+# Nginx Basic Auth (production only)
+NGINX_USER=admin
+NGINX_PASSWORD=change-me-to-a-strong-password
+
 # Alerts (Optional)
 DISCORD_WEBHOOK_URL=your_webhook_url
 ```
@@ -87,7 +91,44 @@ poetry run python run.py
 poetry run trader
 ```
 
-The web dashboard will be available at **http://127.0.0.1:8000** once Phase 3 is complete.
+The web dashboard will be available at **http://127.0.0.1:8000**.
+
+---
+
+## Production Deployment (Nginx Reverse Proxy)
+
+In production, the bot runs behind an **Nginx reverse proxy** with **HTTP Basic Auth** so the dashboard is password-protected and not directly exposed to the internet.
+
+### Architecture
+
+```
+Internet → [Port 80] → Nginx (Basic Auth) → [localhost:8000] → Uvicorn/FastAPI
+```
+
+- **Uvicorn** binds to `127.0.0.1:8000` (not publicly accessible)
+- **Nginx** listens on port `80`, enforces Basic Auth, and proxies authenticated requests
+- Scanner/bot traffic is blocked by Nginx before it reaches the app
+
+### Setup on the server
+
+```bash
+# 1. Install Nginx and htpasswd utility
+sudo apt-get install -y nginx apache2-utils
+
+# 2. Create the password file (using values from .env)
+sudo htpasswd -cb /etc/nginx/.htpasswd admin your-password
+
+# 3. Copy the Nginx config
+sudo cp nginx/trader.conf /etc/nginx/sites-available/trader
+sudo ln -sf /etc/nginx/sites-available/trader /etc/nginx/sites-enabled/trader
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# 4. Test and restart Nginx
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+> **Note:** Ensure your AWS Security Group allows inbound traffic on port **80** (HTTP). Port 8000 can be closed since Nginx handles all external traffic.
 
 ---
 
@@ -118,10 +159,12 @@ trader/
 │   ├── strategy.py          # Pluggable strategy system + EMACrossStrategy
 │   ├── risk_manager.py      # Position sizing, circuit-breaker, order validation
 │   └── bot.py               # Main trading state machine
-├── frontend/                # Web dashboard (Phase 3)
+├── frontend/                # Web dashboard
 │   ├── index.html
 │   ├── styles.css
 │   └── app.js
+├── nginx/
+│   └── trader.conf          # Nginx reverse proxy config
 ├── tests/
 │   ├── __init__.py
 │   ├── test_config.py

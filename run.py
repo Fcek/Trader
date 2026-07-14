@@ -31,10 +31,13 @@ def main() -> None:
 
     logger.info("Starting FastAPI server + trading bot…")
     # main.py is defined in Phase 3; uvicorn will auto-reload the bot via lifespan events.
+    import os
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "8000"))
     uvicorn.run(
         "backend.main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=host,
+        port=port,
         reload=False,
         log_level="info",
     )
