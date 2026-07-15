@@ -144,7 +144,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (pos.take_profit) {
                 tp = formatCurrency(pos.take_profit);
             } else if (pos.activation_price && pos.trail_amount) {
-                tp = `Act: ${formatCurrency(pos.activation_price)} | Tr: ${formatCurrency(pos.trail_amount)}`;
+                const actPrice = parseFloat(pos.activation_price);
+                const trAmount = parseFloat(pos.trail_amount);
+                const slPrice = parseFloat(pos.stop_loss) || 0;
+                const currentAct = Math.max(actPrice, slPrice + trAmount);
+                tp = `Act: ${formatCurrency(currentAct)} | Tr: ${formatCurrency(trAmount)}`;
             }
 
             const availableQty = parseFloat(pos.available_qty);

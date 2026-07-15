@@ -47,35 +47,50 @@ class AlpacaClient:
         self, method: str, path: str, payload: Optional[Dict] = None
     ) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
-        if self._session is None:
-            self._session = httpx.AsyncClient(timeout=10.0)
-            
-        try:
-            if method == "GET":
-                resp = await self._session.get(url, headers=self.headers, params=payload)
-            elif method == "POST":
-                resp = await self._session.post(url, headers=self.headers, json=payload)
-            elif method == "DELETE":
-                resp = await self._session.delete(url, headers=self.headers, params=payload)
-            elif method == "PATCH":
-                resp = await self._session.patch(url, headers=self.headers, json=payload)
-            else:
-                raise ValueError(f"Unsupported method: {method}")
+        
+        for attempt in range(3):
+            if self._session is None or self._session.is_closed:
+                self._session = httpx.AsyncClient(timeout=10.0)
+                
+            try:
+                if method == "GET":
+                    resp = await self._session.get(url, headers=self.headers, params=payload)
+                elif method == "POST":
+                    resp = await self._session.post(url, headers=self.headers, json=payload)
+                elif method == "DELETE":
+                    resp = await self._session.delete(url, headers=self.headers, params=payload)
+                elif method == "PATCH":
+                    resp = await self._session.patch(url, headers=self.headers, json=payload)
+                else:
+                    raise ValueError(f"Unsupported method: {method}")
 
-            if resp.status_code not in (200, 201, 204):
-                if resp.status_code == 404 and method == "DELETE" and path.startswith("/v2/positions/"):
-                    add_log("INFO", f"Position already closed or not found on broker: {path}")
-                    return {}
-                msg = f"Alpaca API {resp.status_code}: {resp.text}"
-                add_log("ERROR", msg)
-                raise RuntimeError(msg)
+                if resp.status_code not in (200, 201, 204):
+                    if resp.status_code == 404 and method == "DELETE" and path.startswith("/v2/positions/"):
+                        add_log("INFO", f"Position already closed or not found on broker: {path}")
+                        return {}
+                    
+                    # Retry on 5xx server errors
+                    if resp.status_code >= 500 and attempt < 2:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
 
-            return {} if resp.status_code == 204 else resp.json()
-        except RuntimeError:
-            raise
-        except Exception as exc:
-            add_log("ERROR", f"HTTP {method} {path} failed: {exc}")
-            raise
+                    msg = f"Alpaca API {resp.status_code}: {resp.text}"
+                    add_log("ERROR", msg)
+                    raise RuntimeError(msg)
+
+                return {} if resp.status_code == 204 else resp.json()
+                
+            except httpx.RequestError as exc:
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                add_log("ERROR", f"HTTP {method} {path} failed after retries: {exc.__class__.__name__} - {exc}")
+                raise
+            except RuntimeError:
+                raise
+            except Exception as exc:
+                add_log("ERROR", f"HTTP {method} {path} failed: {exc.__class__.__name__} - {exc}")
+                raise
 
     async def get_account(self) -> Dict[str, Any]:
         return await self._request("GET", "/v2/account")
