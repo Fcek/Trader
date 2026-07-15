@@ -604,11 +604,36 @@ class TradingBot:
                         "WARNING",
                         f"Adopting untracked broker position: {symbol} ({pos['qty']} shares).",
                     )
+                    adopted_side = "buy" if pos.get("side") == "long" else "sell"
+
+                    # Try to recover SL/TP from open bracket-leg orders on Alpaca
+                    stop_loss = None
+                    take_profit = None
+                    try:
+                        open_orders = await self.client.get_orders(status="open")
+                        for o in open_orders:
+                            if o.get("symbol") != symbol:
+                                continue
+                            order_type = o.get("type", "")
+                            order_side = o.get("side", "")
+                            # For a long position, SL is a sell stop; TP is a sell limit
+                            # For a short position, SL is a buy stop; TP is a buy limit
+                            if order_type == "stop" and o.get("stop_price"):
+                                stop_loss = float(o["stop_price"])
+                            elif order_type == "limit" and o.get("limit_price"):
+                                take_profit = float(o["limit_price"])
+                        if stop_loss or take_profit:
+                            add_log("INFO", f"Recovered orders for {symbol}: SL={stop_loss}, TP={take_profit}")
+                    except Exception as e:
+                        add_log("WARNING", f"Could not recover SL/TP orders for {symbol}: {e}")
+
                     add_trade(
                         symbol=symbol,
                         qty=float(pos["qty"]),
-                        side="buy",
+                        side=adopted_side,
                         entry_price=float(pos.get("avg_entry_price", 0)),
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
                         order_id="ADOPTED_ON_RECOVERY",
                     )
 

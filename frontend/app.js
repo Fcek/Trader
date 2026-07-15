@@ -131,10 +131,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // Handle different shapes (broker payload vs DB payload)
             const symbol = pos.symbol;
             let side = (pos.side || 'BUY').toUpperCase();
-            if (side === 'LONG') side = 'BUY';
-            if (side === 'SHORT') side = 'SELL';
-            const sideClass = side === 'BUY' ? 'side-buy' : 'side-sell';
-            const qty = parseFloat(pos.qty).toFixed(4);
+            if (side === 'LONG' || side === 'BUY') side = 'LONG';
+            if (side === 'SHORT' || side === 'SELL') side = 'SHORT';
+            const sideClass = side === 'LONG' ? 'side-buy' : 'side-sell';
+            const qty = Math.abs(parseFloat(pos.qty)).toFixed(4);
             const entry = parseFloat(pos.avg_entry_price || pos.entry_price || 0);
             const current = pos.current_price ? formatCurrency(parseFloat(pos.current_price)) : '-';
             
@@ -147,7 +147,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const actPrice = parseFloat(pos.activation_price);
                 const trAmount = parseFloat(pos.trail_amount);
                 const slPrice = parseFloat(pos.stop_loss) || 0;
-                const currentAct = Math.max(actPrice, slPrice + trAmount);
+                
+                let currentAct;
+                if (side === 'SHORT') {
+                    currentAct = slPrice > 0 ? Math.min(actPrice, slPrice - trAmount) : actPrice;
+                } else {
+                    currentAct = slPrice > 0 ? Math.max(actPrice, slPrice + trAmount) : actPrice;
+                }
+                
                 tp = `Act: ${formatCurrency(currentAct)} | Tr: ${formatCurrency(trAmount)}`;
             }
 
