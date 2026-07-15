@@ -52,9 +52,9 @@ def test_position_size_wider_stop_gives_smaller_qty(rm):
     assert qty_tight > qty_wide
 
 
-def test_position_size_returns_none_when_sl_above_entry(rm):
-    """SL >= entry must be rejected with None."""
-    result = rm.calculate_position_size(100.0, stop_loss_price=105.0, account_equity=10_000.0)
+def test_position_size_returns_none_when_sl_equals_entry(rm):
+    """SL == entry must be rejected with None."""
+    result = rm.calculate_position_size(100.0, stop_loss_price=100.0, account_equity=10_000.0)
     assert result is None
 
 

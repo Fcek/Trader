@@ -76,12 +76,12 @@ class RiskManager:
         sl = Decimal(str(stop_loss_price))
         eq = Decimal(str(account_equity))
 
-        if sl >= ep:
-            add_log("WARNING", "Invalid stop-loss: SL must be below entry price.")
+        if sl == ep:
+            add_log("WARNING", "Invalid stop-loss: SL must not equal entry price.")
             return None
 
         risk_amount = eq * Decimal(str(MAX_RISK_PER_TRADE_PCT))
-        risk_per_share = ep - sl
+        risk_per_share = abs(ep - sl)
 
         qty_by_risk = risk_amount / risk_per_share
 
@@ -91,7 +91,12 @@ class RiskManager:
         max_qty_by_allocation = max_notional_value / ep
 
         qty = min(qty_by_risk, max_qty_by_allocation)
-        qty = round(float(qty), 4)
+        
+        # Alpaca does not support fractional shares for short selling
+        if sl > ep:
+            qty = float(int(qty))
+        else:
+            qty = round(float(qty), 4)
 
         if qty <= 0:
             add_log("WARNING", "Position size calculated as 0 – rejecting order.")
@@ -141,27 +146,56 @@ class RiskManager:
         if stop_loss_price is None:
             return False, "Stop-loss is required for every entry. Order rejected."
 
-        # 4. Stop-loss must be a real price below entry
+        # 4. Stop-loss logic (infer side from SL vs EP)
         sl = Decimal(str(stop_loss_price))
-        if sl >= ep:
-            return False, f"Stop-loss ({sl}) must be below entry ({ep})."
+        if sl == ep:
+            return False, f"Stop-loss ({sl}) cannot equal entry ({ep})."
+            
+        is_short = sl > ep
 
-        # 5. Take-profit must be above entry
+        # 5. Take-profit must be logical
         if take_profit_price is not None:
             tp = Decimal(str(take_profit_price))
-            if tp <= ep:
-                return False, f"Take-profit ({tp}) must be above entry ({ep})."
+            if not is_short and tp <= ep:
+                return False, f"Take-profit ({tp}) must be above entry ({ep}) for longs."
+            if is_short and tp >= ep:
+                return False, f"Take-profit ({tp}) must be below entry ({ep}) for shorts."
+
+        # 6. Sector exposure limits
+        from backend.config import MAX_SECTOR_EXPOSURE_PCT, SYMBOL_METADATA
+        from backend.database import get_open_trades
+        target_sector = SYMBOL_METADATA.get(symbol, {}).get("sector", "Unknown")
+        open_trades = get_open_trades()
+        sector_exposure = 0.0
+        for t in open_trades:
+            t_sym = t["symbol"]
+            t_sec = SYMBOL_METADATA.get(t_sym, {}).get("sector", "Unknown")
+            if t_sec == target_sector:
+                # Estimate current value with entry price
+                sector_exposure += float(t["qty"]) * float(t["entry_price"])
+        
+        max_sector_notional = float(self.current_equity) * float(MAX_SECTOR_EXPOSURE_PCT)
+        if (sector_exposure + float(order_value)) > max_sector_notional:
+            return False, f"Sector exposure limit breached. Max: ${max_sector_notional:.2f}, Current: ${sector_exposure:.2f}, Order: ${order_value:.2f}"
 
         return True, ""
 
-    def default_levels(self, entry_price: float | Decimal | str) -> Tuple[Decimal, Decimal]:
+    def default_levels(self, entry_price: float | Decimal | str, side: str = "buy") -> Tuple[Decimal, Decimal]:
         """
         Fallback SL and TP if the strategy does not provide dynamic values.
         Uses percentages defined in config.
         """
         ep = Decimal(str(entry_price))
-        stop_loss = round(ep * (Decimal('1') - Decimal(str(DEFAULT_STOP_LOSS_PCT))), 2)
-        take_profit = round(ep * (Decimal('1') + Decimal(str(DEFAULT_TAKE_PROFIT_PCT))), 2)
+        sl_pct = Decimal(str(DEFAULT_STOP_LOSS_PCT))
+        tp_pct = Decimal(str(DEFAULT_TAKE_PROFIT_PCT))
+        
+        if side.lower() == "buy":
+            stop_loss = round(ep * (Decimal('1') - sl_pct), 2)
+            take_profit = round(ep * (Decimal('1') + tp_pct), 2)
+        else:
+            stop_loss = round(ep * (Decimal('1') + sl_pct), 2)
+            take_profit = round(ep * (Decimal('1') - tp_pct), 2)
+            
         return stop_loss, take_profit
 
     # ------------------------------------------------------------------

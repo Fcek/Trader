@@ -39,7 +39,39 @@ MAX_RISK_PER_TRADE_PCT = 0.02   # Risk at most 2% of equity per trade
 MAX_POSITION_SIZE_PCT  = 0.20   # Cap any single position to at most 20% of account equity
 DEFAULT_STOP_LOSS_PCT  = 0.02   # Fallback stop-loss: 2% below entry
 DEFAULT_TAKE_PROFIT_PCT = 0.06  # Fallback take-profit: 6% above entry (1:3 RRR)
+MAX_SECTOR_EXPOSURE_PCT = 0.40  # Max exposure per sector
+MAX_VIX_LEVEL          = 30.0   # Do not open new positions if VIX is above this level
+ALLOW_SHORT_SELLING    = os.getenv("ALLOW_SHORT_SELLING", "True").lower() in ("true", "1", "t", "yes")
 
-# ── Watchlist ─────────────────────────────────────────────────────────────────
-_watchlist_env = os.getenv("WATCHLIST", "AMD,ASML,NVDA,MSFT,PLTR,FSLR,ENPH,ICLN,GLD,NEM,INTC")
-WATCHLIST = [sym.strip().upper() for sym in _watchlist_env.split(",") if sym.strip()]
+# ── Watchlist & Metadata ──────────────────────────────────────────────────────
+# Mapping of tickers to their Sector and Macro ETF for trend filtering
+SYMBOL_METADATA = {
+    "AMD":  {"sector": "Tech", "macro": "QQQ"},
+    "ASML": {"sector": "Tech", "macro": "QQQ"},
+    "NVDA": {"sector": "Tech", "macro": "QQQ"},
+    "MSFT": {"sector": "Tech", "macro": "QQQ"},
+    "PLTR": {"sector": "Tech", "macro": "QQQ"},
+    "INTC": {"sector": "Tech", "macro": "QQQ"},
+    "FSLR": {"sector": "Green", "macro": "ICLN"},
+    "ENPH": {"sector": "Green", "macro": "ICLN"},
+    "ICLN": {"sector": "Green", "macro": "SPY"},
+    "NEE":  {"sector": "Green", "macro": "SPY"},
+    "GLD":  {"sector": "Commodity", "macro": "GLD"},
+    "NEM":  {"sector": "Commodity", "macro": "GLD"},
+    "JPM":  {"sector": "Finance", "macro": "XLF"},
+    "BAC":  {"sector": "Finance", "macro": "XLF"},
+    "JNJ":  {"sector": "Healthcare", "macro": "XLV"},
+    "UNH":  {"sector": "Healthcare", "macro": "XLV"},
+    "PG":   {"sector": "Staples", "macro": "XLP"},
+    "KO":   {"sector": "Staples", "macro": "XLP"},
+    "CAT":  {"sector": "Industrials", "macro": "XLI"},
+    "XOM":  {"sector": "Energy", "macro": "XLE"},
+    "CVX":  {"sector": "Energy", "macro": "XLE"},
+}
+
+_watchlist_env = os.getenv("WATCHLIST", "")
+if _watchlist_env:
+    WATCHLIST = [sym.strip().upper() for sym in _watchlist_env.split(",") if sym.strip()]
+else:
+    WATCHLIST = list(SYMBOL_METADATA.keys())
+

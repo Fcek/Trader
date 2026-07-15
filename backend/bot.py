@@ -288,12 +288,29 @@ class TradingBot:
         # Which symbols do we already hold a position in?
         open_positions = {p["symbol"] for p in await self._get_broker_positions()}
 
-        fetch_list = list(set(self.watchlist + ["QQQ"]))
+        from backend.config import SYMBOL_METADATA, MAX_VIX_LEVEL
+
+        # VIX check
+        skip_new_entries = False
+        try:
+            import yfinance as yf
+            vix = yf.Ticker("^VIX").history(period="1d")
+            if not vix.empty:
+                current_vix = vix["Close"].iloc[-1]
+                if current_vix > MAX_VIX_LEVEL:
+                    add_log("WARNING", f"VIX is {current_vix:.2f} > {MAX_VIX_LEVEL}. Halting new entries.")
+                    skip_new_entries = True
+        except Exception as e:
+            add_log("WARNING", f"Could not fetch VIX: {e}")
+
+        # Fetch unique macro symbols plus watchlist
+        macro_symbols = {SYMBOL_METADATA.get(sym, {}).get("macro", "SPY") for sym in self.watchlist}
+        fetch_list = list(set(self.watchlist) | macro_symbols)
+
         bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="1Hour", limit=251)
 
-        market_bars = bars_dict.get("QQQ", [])
-        if market_bars:
-            market_bars = market_bars[:-1]  # Drop forming day
+        for k in bars_dict:
+            bars_dict[k] = bars_dict[k][:-1]  # Drop forming day
 
         scan_results = []
         for symbol in self.watchlist:
@@ -301,7 +318,9 @@ class TradingBot:
                 break
             try:
                 bars = bars_dict.get(symbol, [])
-                res = await self._evaluate_symbol(symbol, bars, market_bars, equity, free_cash, open_positions)
+                macro_sym = SYMBOL_METADATA.get(symbol, {}).get("macro", "SPY")
+                market_bars = bars_dict.get(macro_sym, [])
+                res = await self._evaluate_symbol(symbol, bars, market_bars, equity, free_cash, open_positions, skip_new_entries)
                 if res:
                     scan_results.append(res)
             except Exception as e:
@@ -319,6 +338,7 @@ class TradingBot:
         equity: float,
         free_cash: float,
         open_positions: set,
+        skip_new_entries: bool = False,
     ) -> str:
         """Evaluate one symbol and submit/skip as appropriate."""
         if not bars or len(bars) < 2:
@@ -343,7 +363,25 @@ class TradingBot:
             except Exception as e:
                 logger.error(f"Failed to write metrics: {e}")
 
-        if signal == "BUY" and symbol not in open_positions:
+        if signal in ["BUY", "SELL_SHORT"] and symbol not in open_positions:
+            if skip_new_entries:
+                return f"{symbol}: {signal} ignored (VIX too high)"
+
+            # Earnings check
+            try:
+                import yfinance as yf
+                ticker = yf.Ticker(symbol)
+                cal = ticker.calendar
+                import pandas as pd
+                if isinstance(cal, pd.DataFrame) and not cal.empty and "Earnings Date" in cal.index:
+                    earliest = cal.loc["Earnings Date"].iloc[0]
+                    days_to_earnings = (earliest.date() - datetime.now(timezone.utc).date()).days
+                    if 0 <= days_to_earnings <= 3:
+                        add_log("INFO", f"Skipping {symbol} due to upcoming earnings in {days_to_earnings} days.")
+                        return f"{symbol}: {signal} ignored (Earnings in {days_to_earnings}d)"
+            except Exception as e:
+                pass # Ignore if we can't fetch earnings
+
             # Check re-entry cooldown to prevent whipsaw
             if symbol in self._cooldowns:
                 cooldown_until = self._cooldowns[symbol] + timedelta(hours=COOLDOWN_HOURS)
@@ -356,7 +394,7 @@ class TradingBot:
             entry_price = float(bars[-1]["c"])
             await self._open_position(symbol, result, equity, free_cash, entry_price)
 
-        elif signal == "SELL" and symbol in open_positions:
+        elif signal in ["SELL", "COVER"] and symbol in open_positions:
             await self._close_position(symbol)
             
         return log_msg
@@ -374,15 +412,21 @@ class TradingBot:
         entry_price: float,
     ) -> None:
         """Submit a bracket BUY order for the given symbol."""
+        side = "buy" if signal_result.get("signal") == "BUY" else "sell"
 
         # Resolve SL / TP (strategy may provide dynamic values, fallback to config)
         stop_loss = signal_result.get("stop_loss")
         activation_price = signal_result.get("activation_price")
         trail_amount = signal_result.get("trail_amount")
         if stop_loss is None or activation_price is None or trail_amount is None:
-            stop_loss, tp = self.risk_manager.default_levels(entry_price)
-            activation_price = entry_price + (entry_price - stop_loss) * 2
-            trail_amount = entry_price - stop_loss
+            stop_loss, tp = self.risk_manager.default_levels(entry_price, side=side)
+            activation_price = entry_price + (entry_price - stop_loss) * 2 if side == "buy" else entry_price - (stop_loss - entry_price) * 2
+            trail_amount = abs(entry_price - stop_loss)
+        else:
+            tp = signal_result.get("take_profit")
+            if not tp:
+                _, default_tp = self.risk_manager.default_levels(entry_price, side=side)
+                tp = default_tp
 
         # Calculate position size
         qty = self.risk_manager.calculate_position_size(entry_price, stop_loss, equity)
@@ -398,22 +442,27 @@ class TradingBot:
             return
 
         # Submit to Alpaca
+        limit_price = round(entry_price * 1.001, 2) if side == "buy" else round(entry_price * 0.999, 2)
+        
         try:
             if qty.is_integer():
                 order = await self.client.submit_order(
                     symbol=symbol,
                     qty=qty,
-                    side="buy",
-                    order_type="market",
+                    side=side,
+                    order_type="limit",
+                    limit_price=limit_price,
                     time_in_force="day",
                     stop_loss_price=stop_loss,
+                    take_profit_price=tp,
                 )
             else:
                 order = await self.client.submit_order(
                     symbol=symbol,
                     qty=qty,
-                    side="buy",
-                    order_type="market",
+                    side=side,
+                    order_type="limit",
+                    limit_price=limit_price,
                     time_in_force="day",
                 )
             order_id = order.get("id")
@@ -422,16 +471,16 @@ class TradingBot:
             trade_id = add_trade(
                 symbol=symbol,
                 qty=qty,
-                side="buy",
+                side=side,
                 entry_price=entry_price,
                 stop_loss=stop_loss,
-                take_profit=None,
+                take_profit=tp,
                 activation_price=activation_price,
                 trail_amount=trail_amount,
                 order_id=order_id,
             )
 
-            msg = f"✅ BUY {qty} × {symbol} @ ~{entry_price} | SL: {stop_loss} | Activate: {activation_price} | Trail: {trail_amount}"
+            msg = f"✅ {side.upper()} {qty} × {symbol} @ ~{entry_price} (Limit {limit_price}) | SL: {stop_loss} | Activate: {activation_price} | Trail: {trail_amount}"
             add_log("INFO", msg)
             await self._emit("trade_opened", {
                 "trade_id": trade_id,
@@ -444,7 +493,7 @@ class TradingBot:
             })
 
         except Exception as e:
-            add_log("ERROR", f"Failed to submit BUY order for {symbol}: {e}")
+            add_log("ERROR", f"Failed to submit {side.upper()} order for {symbol}: {e}")
 
     async def _close_position(self, symbol: str) -> None:
         """Submit a request to close an existing position entirely."""

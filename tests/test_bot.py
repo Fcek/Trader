@@ -16,35 +16,36 @@ async def test_evaluate_all_symbols(bot):
     # Mock positions
     bot._get_broker_positions = AsyncMock(return_value=[])
     
-    # Mock historical data to return AAPL and QQQ
+    # Mock historical data to return AAPL and SPY
     mock_bars = {
         "AAPL": [{"c": 150}, {"c": 151}],
-        "QQQ": [{"c": 300}, {"c": 301}]
+        "SPY": [{"c": 300}, {"c": 301}]
     }
     bot.client.get_historical_bars_multi.return_value = mock_bars
     bot.watchlist = ["AAPL"]
     bot.running = True
-    
+
     # Mock _evaluate_symbol so it doesn't do real stuff
     bot._evaluate_symbol = AsyncMock(return_value="Mocked Result")
-    
+
     # Mock account
     bot.client.get_account.return_value = {"equity": "10000", "cash": "10000"}
-    
+
     await bot._evaluate_all_symbols()
-    
+
     bot.client.get_historical_bars_multi.assert_called_once()
     args, kwargs = bot.client.get_historical_bars_multi.call_args
-    assert "QQQ" in args[0]
-    
-    # Ensure QQQ was passed as market_bars but with the forming bar dropped
+    assert "SPY" in args[0]
+
+    # Ensure SPY was passed as market_bars but with the forming bar dropped
     bot._evaluate_symbol.assert_called_once_with(
         "AAPL",
-        mock_bars["AAPL"],
-        [{"c": 300}], # QQQ with forming bar dropped
-        10000,
-        10000,
-        set()
+        [{"c": 150}], # AAPL with forming bar dropped
+        [{"c": 300}], # SPY with forming bar dropped
+        10000.0,
+        10000.0,
+        set(),
+        False
     )
 
 @pytest.mark.asyncio
@@ -58,18 +59,20 @@ async def test_open_position(bot):
     
     # Mock strategy signal output
     signal_result = {
+        "signal": "BUY",
         "stop_loss": 140.0,
         "activation_price": 160.0,
         "trail_amount": 10.0
     }
-    
+
     await bot._open_position("AAPL", signal_result, 10000, 10000, 150.0)
-    
+
     bot.client.submit_order.assert_called_once_with(
         symbol="AAPL",
         qty=10.0,
         side="buy",
-        order_type="market",
+        order_type="limit",
+        limit_price=150.15,
         time_in_force="day",
         stop_loss_price=140.0
     )

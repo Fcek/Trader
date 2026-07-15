@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from backend.config import ALLOW_SHORT_SELLING
+
 logger = logging.getLogger("strategy")
 
 
@@ -118,6 +120,7 @@ class EMACrossStrategy(BaseStrategy):
         rsi_ok        = float(last["rsi"]) < self.rsi_max
 
         macro_ok = True
+        macro_ok_short = True
         if market_bars and len(market_bars) >= self.trend_window:
             mdf = pd.DataFrame(market_bars)
             mdf = mdf.rename(columns={"c": "close"})
@@ -126,6 +129,7 @@ class EMACrossStrategy(BaseStrategy):
             market_price = float(mdf.iloc[-1]["close"])
             market_ema_t = float(mdf.iloc[-1]["ema_t"])
             macro_ok = market_price > market_ema_t
+            macro_ok_short = market_price < market_ema_t
 
         metrics = {
             "price": price,
@@ -136,7 +140,8 @@ class EMACrossStrategy(BaseStrategy):
             "vol_sma": float(last["vol_sma"]),
             "rsi": float(last["rsi"]),
             "atr": atr,
-            "macro_ok": macro_ok
+            "macro_ok": macro_ok,
+            "macro_ok_short": macro_ok_short,
         }
 
         if bullish_cross and above_trend and high_volume and rsi_ok and macro_ok:
@@ -155,13 +160,41 @@ class EMACrossStrategy(BaseStrategy):
                 "metrics": metrics
             }
 
+        below_trend = price < float(last["ema_t"])
+        rsi_ok_short = float(last["rsi"]) > (100 - self.rsi_max)
+        if bearish_cross and below_trend and high_volume and rsi_ok_short and macro_ok_short and ALLOW_SHORT_SELLING:
+            risk_amount = round(atr * self.risk_multiplier, 2)
+            sl = round(price + risk_amount, 2)
+            activation = round(price - (risk_amount * 2), 2)
+            return {
+                "signal": "SELL_SHORT",
+                "stop_loss": sl,
+                "activation_price": activation,
+                "trail_amount": risk_amount,
+                "reason": (
+                    f"Bearish EMA{self.short_window}/{self.long_window} cross "
+                    f"below EMA{self.trend_window} with volume and RSI confirmation. Risk={risk_amount}, SL={sl}, Activate={activation}, Trail={risk_amount}"
+                ),
+                "metrics": metrics
+            }
+
         if bearish_cross:
             return {
                 "signal": "SELL",
                 "stop_loss": None,
                 "activation_price": None,
                 "trail_amount": None,
-                "reason": f"Bearish EMA{self.short_window}/{self.long_window} cross – exit signal.",
+                "reason": f"Bearish EMA{self.short_window}/{self.long_window} cross – exit long signal.",
+                "metrics": metrics
+            }
+
+        if bullish_cross and ALLOW_SHORT_SELLING:
+            return {
+                "signal": "COVER",
+                "stop_loss": None,
+                "activation_price": None,
+                "trail_amount": None,
+                "reason": f"Bullish EMA{self.short_window}/{self.long_window} cross – exit short signal.",
                 "metrics": metrics
             }
 

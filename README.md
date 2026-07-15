@@ -6,11 +6,12 @@ A 24/7 Python **swing trading bot** with a premium web dashboard, powered by the
 
 ## Features
 
-- **Swing trading engine** — EMA crossover strategy with ATR-based dynamic stop-loss & take-profit
-- **Risk management** — fixed-fraction position sizing, daily drawdown circuit-breaker, mandatory SL on every order
-- **Crash recovery** — on restart, the bot reconciles its local database against live Alpaca positions so no trade is ever lost or double-counted
-- **Premium web dashboard** — real-time equity chart, open positions table, trade history, and system log (Phase 3)
-- **Alpaca Paper Trading** — full demo mode with no real money at risk while testing
+- **Swing trading engine** — EMA crossover strategy with ATR-based dynamic stop-loss & take-profit. Includes Long and Short-selling capabilities against macro-ETF trend filters.
+- **Risk management** — fixed-fraction position sizing, daily drawdown circuit-breaker, mandatory SL on every order, and dynamic 40% sector-exposure limits to enforce diversification.
+- **Alpha & Safety Filters** — VIX volatility monitoring (halts new entries on spikes > 30) and automatic earnings-date avoidance to prevent overnight gap risks.
+- **Crash recovery** — on restart, the bot reconciles its local database against live Alpaca positions so no trade is ever lost or double-counted.
+- **Premium web dashboard** — real-time equity chart, open positions table, trade history, and system logs.
+- **Alpaca Paper Trading** — full demo mode with no real money at risk while testing.
 
 ---
 
@@ -190,6 +191,9 @@ All configurable in [`.env`](.env.example):
 | `ALPACA_PAPER_TRADING` | `True` | Use paper account (demo). Set `False` only for live |
 | `MAX_DRAWDOWN_PCT` | 15% | Bot halts if daily equity drops more than this |
 | `MAX_RISK_PER_TRADE_PCT` | 2% | Maximum equity risked on any single trade |
+| `MAX_SECTOR_EXPOSURE_PCT` | 40% | Maximum equity allocation allowed in any single sector |
+| `MAX_VIX_LEVEL` | 30.0 | Halts opening of new positions if VIX exceeds this level |
+| `ALLOW_SHORT_SELLING` | `True` | Master toggle to enable/disable short selling |
 | `DEFAULT_STOP_LOSS_PCT` | 2% | Fallback SL if strategy provides no dynamic value |
 | `DEFAULT_TAKE_PROFIT_PCT` | 6% | Fallback TP (1:3 risk-reward ratio) |
 | `BOT_RECOVERY_CODE` | — | Secret code required for emergency API actions |

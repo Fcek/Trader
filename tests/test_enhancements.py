@@ -1,0 +1,75 @@
+import pytest
+from decimal import Decimal
+from backend.risk_manager import RiskManager
+from backend.strategy import EMACrossStrategy
+from backend.config import ALLOW_SHORT_SELLING, MAX_SECTOR_EXPOSURE_PCT, MAX_RISK_PER_TRADE_PCT
+
+def test_risk_manager_short_math():
+    rm = RiskManager(starting_balance=10000)
+    
+    # Short entry at 100, SL at 110. Risk is $10 per share.
+    # Total risk allowed = 10000 * 0.02 = 200.
+    # Qty = 200 / 10 = 20 shares.
+    qty = rm.calculate_position_size(entry_price=100, stop_loss_price=110, account_equity=10000)
+    assert qty == 20.0
+    
+    # Validate a short order
+    # Entry 100, SL 110, TP 80
+    approved, msg = rm.validate_order(
+        symbol="AAPL",
+        qty=20,
+        entry_price=100,
+        stop_loss_price=110,
+        take_profit_price=80,
+        free_cash=10000
+    )
+    assert approved == True
+
+    # Invalid short SL (below entry)
+    approved, msg = rm.validate_order(
+        symbol="AAPL",
+        qty=20,
+        entry_price=100,
+        stop_loss_price=90,
+        take_profit_price=80,
+        free_cash=10000
+    )
+    assert approved == False
+
+from unittest.mock import patch
+
+def test_risk_manager_sector_exposure():
+    rm = RiskManager(starting_balance=10000)
+    
+    # Mock config and DB
+    with patch("backend.config.MAX_SECTOR_EXPOSURE_PCT", 0.40), \
+         patch("backend.config.SYMBOL_METADATA", {
+             "NVDA": {"sector": "Tech"},
+             "AMD": {"sector": "Tech"}
+         }), \
+         patch("backend.database.get_open_trades", return_value=[
+             {"symbol": "NVDA", "qty": 10, "entry_price": 300}
+         ]):
+        
+        # Try to buy $2,000 more of AMD (Total $5,000 Tech exposure > $4,000 limit)
+        approved, msg = rm.validate_order(
+            symbol="AMD",
+            qty=20,
+            entry_price=100,
+            stop_loss_price=90,
+            take_profit_price=None,
+            free_cash=10000
+        )
+        assert approved == False
+        assert "Sector exposure limit breached" in msg
+        
+        # Try to buy $500 more of AMD (Total $3,500 Tech exposure <= $4,000 limit)
+        approved, msg = rm.validate_order(
+            symbol="AMD",
+            qty=5,
+            entry_price=100,
+            stop_loss_price=90,
+            take_profit_price=None,
+            free_cash=10000
+        )
+        assert approved == True

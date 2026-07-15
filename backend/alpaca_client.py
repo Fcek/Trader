@@ -149,12 +149,16 @@ class AlpacaClient:
         if order_type == "trailing_stop" and trail_price:
             payload["trail_price"] = str(trail_price)
 
-        if stop_loss_price or take_profit_price:
+        if stop_loss_price and take_profit_price:
             payload["order_class"] = "bracket"
-            if take_profit_price:
-                payload["take_profit"] = {"limit_price": str(take_profit_price)}
-            if stop_loss_price:
-                payload["stop_loss"] = {"stop_price": str(stop_loss_price)}
+            payload["take_profit"] = {"limit_price": str(take_profit_price)}
+            payload["stop_loss"] = {"stop_price": str(stop_loss_price)}
+        elif stop_loss_price:
+            payload["order_class"] = "oto"
+            payload["stop_loss"] = {"stop_price": str(stop_loss_price)}
+        elif take_profit_price:
+            payload["order_class"] = "oto"
+            payload["take_profit"] = {"limit_price": str(take_profit_price)}
 
         msg = (
             f"Submitting {side.upper()} {qty}×{symbol} (type={order_type})"
