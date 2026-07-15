@@ -95,6 +95,9 @@ class AlpacaClient:
     async def get_account(self) -> Dict[str, Any]:
         return await self._request("GET", "/v2/account")
 
+    async def get_asset(self, symbol: str) -> Dict[str, Any]:
+        return await self._request("GET", f"/v2/assets/{symbol}")
+
     async def get_positions(self) -> List[Dict[str, Any]]:
         return await self._request("GET", "/v2/positions")
 

@@ -414,6 +414,16 @@ class TradingBot:
         """Submit a bracket BUY order for the given symbol."""
         side = "buy" if signal_result.get("signal") == "BUY" else "sell"
 
+        if side == "sell":
+            try:
+                asset_info = await self.client.get_asset(symbol)
+                if not asset_info.get("shortable", False):
+                    add_log("WARNING", f"Cannot short sell {symbol} as it is not shortable on Alpaca.")
+                    return
+            except Exception as e:
+                add_log("WARNING", f"Failed to check if {symbol} is shortable: {e}")
+                return
+
         # Resolve SL / TP (strategy may provide dynamic values, fallback to config)
         stop_loss = signal_result.get("stop_loss")
         activation_price = signal_result.get("activation_price")
