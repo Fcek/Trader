@@ -503,13 +503,14 @@ class TradingBot:
                     entry_price = float(trade["entry_price"])
                     qty = float(trade["qty"])
                     pnl = (filled_price - entry_price) * qty
+                    pnl_str = f"Gain: ${pnl:.2f}" if pnl >= 0 else f"Loss: ${abs(pnl):.2f}"
                     update_trade_exit(
                         trade_id=trade["id"],
                         exit_price=filled_price,
                         pnl=pnl,
                         order_id=order_id
                     )
-                    add_log("INFO", f"Trade for {symbol} closed in DB. PnL: ${pnl:.2f}")
+                    add_log("INFO", f"Trade for {symbol} closed in DB. {pnl_str}")
 
         elif ev_type in ("canceled", "expired"):
             add_log("WARNING", f"Order {order_id} for {symbol} was {ev_type}.")
@@ -569,7 +570,8 @@ class TradingBot:
                             entry_price = float(trade["entry_price"])
                             qty = float(trade["qty"])
                             pnl = (exit_price - entry_price) * qty
-                            add_log("INFO", f"Recovered exit price for {symbol}: ${exit_price:.2f}, PnL: ${pnl:.2f}")
+                            pnl_str = f"Gain: ${pnl:.2f}" if pnl >= 0 else f"Loss: ${abs(pnl):.2f}"
+                            add_log("INFO", f"Recovered exit price for {symbol}: ${exit_price:.2f}, {pnl_str}")
                     except Exception as e:
                         add_log("WARNING", f"Could not recover exit price for {symbol}: {e}")
 

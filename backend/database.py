@@ -115,7 +115,7 @@ def add_log(level: str, message: str) -> None:
         
         if level in ("ERROR", "CRITICAL"):
             _send_discord_alert(f"🚨 **{level}** 🚨\n```\n{message}\n```")
-        elif "Order FILLED:" in message or "PnL:" in message or "Soft SL triggered" in message:
+        elif "Order FILLED:" in message or "PnL:" in message or "Gain:" in message or "Loss:" in message or "Soft SL triggered" in message:
             _send_discord_alert(f"🔔 **TRADE UPDATE** 🔔\n```\n{message}\n```")
 
         conn = get_db_connection()
