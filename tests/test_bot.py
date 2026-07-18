@@ -54,6 +54,7 @@ async def test_open_position(bot):
     bot.risk_manager = MagicMock()
     bot.risk_manager.calculate_position_size = MagicMock(return_value=10.0)
     bot.risk_manager.validate_order = MagicMock(return_value=(True, ""))
+    bot.risk_manager.default_levels = MagicMock(return_value=(140.0, 160.0))
     
     bot.client.submit_order.return_value = {"id": "mock_order_123"}
     
@@ -74,13 +75,14 @@ async def test_open_position(bot):
         order_type="limit",
         limit_price=150.15,
         time_in_force="day",
-        stop_loss_price=140.0
+        stop_loss_price=140.0,
+        take_profit_price=160.0
     )
     
     trades = get_open_trades()
     assert len(trades) == 1
     assert trades[0]["symbol"] == "AAPL"
-    assert trades[0]["take_profit"] is None
+    assert trades[0]["take_profit"] == 160.0
     assert trades[0]["activation_price"] == 160.0
     assert trades[0]["trail_amount"] == 10.0
     assert trades[0]["alpaca_entry_order_id"] == "mock_order_123"
