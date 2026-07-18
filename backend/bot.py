@@ -208,21 +208,33 @@ class TradingBot:
             await asyncio.sleep(15)
 
     async def _equity_monitor_loop(self) -> None:
-        """Polls account equity every minute and triggers circuit-breaker."""
+        """Polls account equity every minute and triggers circuit-breaker.
+        Skips recording snapshots when the market is closed to avoid
+        flat lines on the dashboard chart.
+        """
         while self.running:
             try:
+                # Check if market is open — skip snapshot recording when closed
+                market_open = True
+                try:
+                    clock = await self.client.get_clock()
+                    market_open = clock.get("is_open", False)
+                except Exception as e:
+                    add_log("WARNING", f"Could not check market clock in equity monitor: {e}. Recording anyway.")
+
                 account = await self.client.get_account()
                 equity = float(account["equity"])
                 balance = float(account["cash"])
                 unrealized = float(account.get("unrealized_pl", 0))
 
-                from backend.database import get_open_trades
-                open_trades = get_open_trades()
-                # Alpaca paper trading glitch: positions disappear, equity drops to cash balance
-                if len(open_trades) > 0 and equity == balance:
-                    add_log("WARNING", "Ignoring invalid Alpaca equity snapshot (paper trading glitch).")
-                else:
-                    save_equity_snapshot(balance, equity, unrealized)
+                if market_open:
+                    from backend.database import get_open_trades
+                    open_trades = get_open_trades()
+                    # Alpaca paper trading glitch: positions disappear, equity drops to cash balance
+                    if len(open_trades) > 0 and equity == balance:
+                        add_log("WARNING", "Ignoring invalid Alpaca equity snapshot (paper trading glitch).")
+                    else:
+                        save_equity_snapshot(balance, equity, unrealized)
 
                 await self._emit("equity_update", {
                     "equity": equity,
