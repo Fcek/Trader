@@ -17,6 +17,50 @@ document.addEventListener('DOMContentLoaded', () => {
     gradientFill.addColorStop(0, 'rgba(0, 242, 254, 0.5)');
     gradientFill.addColorStop(1, 'rgba(0, 242, 254, 0.0)');
 
+    let activeTimeframe = 'ALL';
+
+    function formatChartTick(timestampStr, timeframe, chartLabels) {
+        if (!timestampStr) return '';
+        const d = new Date(timestampStr);
+        if (isNaN(d.getTime())) return timestampStr;
+
+        let spanMs = 0;
+        if (chartLabels && chartLabels.length > 1) {
+            const first = new Date(chartLabels[0]).getTime();
+            const last = new Date(chartLabels[chartLabels.length - 1]).getTime();
+            if (!isNaN(first) && !isNaN(last)) {
+                spanMs = last - first;
+            }
+        }
+
+        const hours = d.getHours().toString().padStart(2, '0');
+        const minutes = d.getMinutes().toString().padStart(2, '0');
+        const timeStr = `${hours}:${minutes}`;
+
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const month = monthNames[d.getMonth()];
+        const day = d.getDate();
+        const dateStr = `${month} ${day}`;
+        const year = d.getFullYear();
+
+        const DAY_MS = 86400000;
+
+        if (timeframe === '1D') {
+            return timeStr;
+        } else if (timeframe === '1W' || timeframe === '1M') {
+            return dateStr;
+        }
+
+        // timeframe === 'ALL' (adaptive based on actual dataset span)
+        if (spanMs <= DAY_MS * 1.5) {
+            return timeStr;
+        } else if (spanMs > DAY_MS * 180) {
+            return `${dateStr}, ${year}`;
+        } else {
+            return dateStr;
+        }
+    }
+
     const equityChart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -45,7 +89,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     titleColor: '#94a3b8',
                     bodyColor: '#f0f0f5',
                     borderColor: 'rgba(255, 255, 255, 0.1)',
-                    borderWidth: 1
+                    borderWidth: 1,
+                    callbacks: {
+                        title: function(tooltipItems) {
+                            if (!tooltipItems || !tooltipItems.length) return '';
+                            const rawLabel = tooltipItems[0].label;
+                            const d = new Date(rawLabel);
+                            if (isNaN(d.getTime())) return rawLabel;
+
+                            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                            const month = monthNames[d.getMonth()];
+                            const day = d.getDate();
+                            const year = d.getFullYear();
+                            const hours = d.getHours().toString().padStart(2, '0');
+                            const minutes = d.getMinutes().toString().padStart(2, '0');
+                            const seconds = d.getSeconds().toString().padStart(2, '0');
+                            return `${month} ${day}, ${year} ${hours}:${minutes}:${seconds}`;
+                        }
+                    }
                 }
             },
             scales: {
@@ -55,12 +116,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         color: '#94a3b8',
                         maxTicksLimit: 10,
                         callback: function(val, index) {
-                            // Extract just the HH:mm from the timestamp string
                             const label = this.getLabelForValue(val);
-                            if (!label) return '';
-                            const d = new Date(label);
-                            return d.getHours().toString().padStart(2, '0') + ':' + 
-                                   d.getMinutes().toString().padStart(2, '0');
+                            return formatChartTick(label, activeTimeframe, this.chart.data.labels);
                         }
                     },
                     grid: {
@@ -240,6 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchEquityData(timeframe = 'ALL') {
         try {
+            activeTimeframe = timeframe;
             const equityRes = await fetch(`/api/equity?timeframe=${timeframe}&limit=5000`);
             const equityHistory = await equityRes.json();
             
