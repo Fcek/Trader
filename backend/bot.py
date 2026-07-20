@@ -71,7 +71,6 @@ class TradingBot:
         self._listeners: List[Callable[[Dict[str, Any]], Any]] = []
         self._tasks: List[asyncio.Task] = []
         self._pending_closes: set[str] = set()
-        self._cooldowns: Dict[str, datetime] = {}  # symbol -> last exit time
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -270,9 +269,19 @@ class TradingBot:
                     clock = await self.client.get_clock()
                     if not clock.get("is_open", False):
                         next_open = clock.get("next_open", "unknown")
-                        add_log("INFO", f"⏸ Market closed. Next open: {next_open}. Skipping scan.")
+                        logger.info(f"⏸ Market closed. Next open: {next_open}. Skipping scan.")
                         await asyncio.sleep(STRATEGY_INTERVAL_SECONDS)
                         continue
+                    else:
+                        next_close_str = clock.get("next_close")
+                        if next_close_str:
+                            next_close = datetime.fromisoformat(next_close_str)
+                            now = datetime.now(timezone.utc)
+                            time_to_close = (next_close - now).total_seconds()
+                            if time_to_close > 15 * 60:
+                                logger.info(f"⏳ Market open but not near close ({(time_to_close/3600):.1f}h remaining). Skipping scan.")
+                                await asyncio.sleep(STRATEGY_INTERVAL_SECONDS)
+                                continue
                 except Exception as e:
                     add_log("WARNING", f"Could not check market clock: {e}. Scanning anyway.")
 
@@ -319,10 +328,9 @@ class TradingBot:
         macro_symbols = {SYMBOL_METADATA.get(sym, {}).get("macro", "SPY") for sym in self.watchlist}
         fetch_list = list(set(self.watchlist) | macro_symbols)
 
-        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="1Hour", limit=251)
-
-        for k in bars_dict:
-            bars_dict[k] = bars_dict[k][:-1]  # Drop forming day
+        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="1Day", limit=251)
+        
+        # Note: forming day is dropped in _evaluate_symbol
 
         scan_results = []
         for symbol in self.watchlist:
@@ -395,13 +403,14 @@ class TradingBot:
                 pass # Ignore if we can't fetch earnings
 
             # Check re-entry cooldown to prevent whipsaw
-            if symbol in self._cooldowns:
-                cooldown_until = self._cooldowns[symbol] + timedelta(hours=COOLDOWN_HOURS)
+            last_exit_str = get_bot_state(f"cooldown_{symbol}")
+            if last_exit_str:
+                last_exit = datetime.fromisoformat(last_exit_str)
+                cooldown_until = last_exit + timedelta(hours=COOLDOWN_HOURS)
                 if datetime.now(timezone.utc) < cooldown_until:
                     remaining = (cooldown_until - datetime.now(timezone.utc)).total_seconds() / 3600
                     log_msg += f" (cooldown {remaining:.1f}h remaining)"
                     return log_msg
-                del self._cooldowns[symbol]
 
             entry_price = float(bars[-1]["c"])
             await self._open_position(symbol, result, equity, free_cash, entry_price)
@@ -522,7 +531,7 @@ class TradingBot:
         try:
             order = await self.client.close_position(symbol)
             self._pending_closes.add(symbol)
-            self._cooldowns[symbol] = datetime.now(timezone.utc)
+            set_bot_state(f"cooldown_{symbol}", datetime.now(timezone.utc).isoformat())
             add_log("INFO", f"📤 Sent SELL signal for {symbol} (position closed, {COOLDOWN_HOURS}h cooldown started).")
         except Exception as e:
             add_log("ERROR", f"Failed to close position for {symbol}: {e}")

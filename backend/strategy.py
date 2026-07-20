@@ -49,10 +49,10 @@ class EMACrossStrategy(BaseStrategy):
         trend_window: int = 200,
         atr_window: int = 14,
         volume_window: int = 20,
-        volume_multiplier: float = 1.5,
+        volume_multiplier: float = 1.0,
         rsi_window: int = 14,
-        rsi_max: float = 65.0,
-        risk_multiplier: float = 2.0,
+        rsi_max: float = 70.0,
+        risk_multiplier: float = 2.5,
     ) -> None:
         super().__init__("EMA_Cross")
         self.short_window = short_window

@@ -37,11 +37,11 @@ async def test_evaluate_all_symbols(bot):
     args, kwargs = bot.client.get_historical_bars_multi.call_args
     assert "SPY" in args[0]
 
-    # Ensure SPY was passed as market_bars but with the forming bar dropped
+    # Ensure SPY was passed as market_bars with the full list (forming bar is dropped inside _evaluate_symbol)
     bot._evaluate_symbol.assert_called_once_with(
         "AAPL",
-        [{"c": 150}], # AAPL with forming bar dropped
-        [{"c": 300}], # SPY with forming bar dropped
+        [{"c": 150}, {"c": 151}], # AAPL with forming bar
+        [{"c": 300}, {"c": 301}], # SPY with forming bar
         10000.0,
         10000.0,
         set(),
