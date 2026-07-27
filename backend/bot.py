@@ -71,6 +71,9 @@ class TradingBot:
         self._listeners: List[Callable[[Dict[str, Any]], Any]] = []
         self._tasks: List[asyncio.Task] = []
         self._pending_closes: set[str] = set()
+        # Counter for consecutive Alpaca paper-trading equity glitches.
+        # Suppresses repeated log spam: logs on first hit then every 10th.
+        self._equity_glitch_count: int = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -231,8 +234,16 @@ class TradingBot:
                     open_trades = get_open_trades()
                     # Alpaca paper trading glitch: positions disappear, equity drops to cash balance
                     if len(open_trades) > 0 and equity == balance:
-                        add_log("WARNING", "Ignoring invalid Alpaca equity snapshot (paper trading glitch).")
+                        self._equity_glitch_count += 1
+                        # Log only the first occurrence and every 10th thereafter to avoid spam
+                        if self._equity_glitch_count == 1:
+                            add_log("WARNING", "Ignoring invalid Alpaca equity snapshot (paper trading glitch). Subsequent occurrences will be suppressed.")
+                        elif self._equity_glitch_count % 10 == 0:
+                            add_log("WARNING", f"Alpaca equity glitch still occurring (x{self._equity_glitch_count} times). Continuing to ignore.")
                     else:
+                        if self._equity_glitch_count > 0:
+                            add_log("INFO", f"Alpaca equity glitch resolved after {self._equity_glitch_count} occurrence(s). Resuming normal snapshots.")
+                            self._equity_glitch_count = 0
                         save_equity_snapshot(balance, equity, unrealized)
 
                 await self._emit("equity_update", {
@@ -252,7 +263,7 @@ class TradingBot:
                     return
 
             except Exception as e:
-                add_log("ERROR", f"Equity monitor error: {e}")
+                add_log("ERROR", f"Equity monitor error: {type(e).__name__}: {e}")
 
             await asyncio.sleep(EQUITY_POLL_INTERVAL_SECONDS)
 
