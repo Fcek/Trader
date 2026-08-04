@@ -284,13 +284,21 @@ class TradingBot:
                         await asyncio.sleep(STRATEGY_INTERVAL_SECONDS)
                         continue
                     else:
+                        # Skip the first 30 min post-open to avoid opening-bell noise.
+                        # Alpaca's next_open refers to the *next* open when market is already
+                        # open, so we infer time-since-open from (market_day - time_to_close).
                         next_close_str = clock.get("next_close")
                         if next_close_str:
                             next_close = datetime.fromisoformat(next_close_str)
                             now = datetime.now(timezone.utc)
+                            market_day_seconds = 6.5 * 3600  # 9:30–16:00 ET = 6.5 h
                             time_to_close = (next_close - now).total_seconds()
-                            if time_to_close > 15 * 60:
-                                logger.info(f"⏳ Market open but not near close ({(time_to_close/3600):.1f}h remaining). Skipping scan.")
+                            time_since_open = market_day_seconds - time_to_close
+                            if time_since_open < 30 * 60:
+                                logger.info(
+                                    f"⏳ Market just opened ({time_since_open/60:.0f} min ago). "
+                                    "Waiting 30 min for opening volatility to settle."
+                                )
                                 await asyncio.sleep(STRATEGY_INTERVAL_SECONDS)
                                 continue
                 except Exception as e:
@@ -425,6 +433,47 @@ class TradingBot:
 
             entry_price = float(bars[-1]["c"])
             await self._open_position(symbol, result, equity, free_cash, entry_price)
+
+        elif signal == "SELL" and symbol not in open_positions:
+            # Bearish EMA cross with no open long — try to open a short if conditions permit.
+            from backend.config import ALLOW_SHORT_SELLING
+            macro_ok_short = result.get("metrics", {}).get("macro_ok_short", False) if result.get("metrics") else False
+            if ALLOW_SHORT_SELLING and macro_ok_short:
+                if skip_new_entries:
+                    return f"{symbol}: SELL_SHORT ignored (VIX too high)"
+
+                # Earnings check
+                try:
+                    import yfinance as yf
+                    ticker = yf.Ticker(symbol)
+                    cal = ticker.calendar
+                    import pandas as pd
+                    if isinstance(cal, pd.DataFrame) and not cal.empty and "Earnings Date" in cal.index:
+                        earliest = cal.loc["Earnings Date"].iloc[0]
+                        days_to_earnings = (earliest.date() - datetime.now(timezone.utc).date()).days
+                        if 0 <= days_to_earnings <= 3:
+                            add_log("INFO", f"Skipping short {symbol} due to upcoming earnings in {days_to_earnings} days.")
+                            return f"{symbol}: SELL_SHORT ignored (Earnings in {days_to_earnings}d)"
+                except Exception:
+                    pass
+
+                # Cooldown check
+                last_exit_str = get_bot_state(f"cooldown_{symbol}")
+                if last_exit_str:
+                    last_exit = datetime.fromisoformat(last_exit_str)
+                    cooldown_until = last_exit + timedelta(hours=COOLDOWN_HOURS)
+                    if datetime.now(timezone.utc) < cooldown_until:
+                        remaining = (cooldown_until - datetime.now(timezone.utc)).total_seconds() / 3600
+                        log_msg += f" → short blocked (cooldown {remaining:.1f}h remaining)"
+                        return log_msg
+
+                # Re-cast to SELL_SHORT so _open_position opens a short
+                short_result = {**result, "signal": "SELL_SHORT"}
+                entry_price = float(bars[-1]["c"])
+                add_log("INFO", f"🔀 Bearish cross on {symbol} with no long position – opening short.")
+                await self._open_position(symbol, short_result, equity, free_cash, entry_price)
+                log_msg += " → opening short"
+
 
         elif signal in ["SELL", "COVER"] and symbol in open_positions:
             await self._close_position(symbol)
