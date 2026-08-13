@@ -141,8 +141,20 @@ class TradingBot:
         from backend.database import get_open_trades, update_trade_stop_loss
         while self.running:
             try:
-                positions = await self._get_broker_positions()
+                # Short-circuit: only hit the broker API if there are open
+                # fractional trades that need software stop-loss monitoring.
+                # This avoids unnecessary API calls (and ReadTimeout errors)
+                # when the market is closed or there are no fractional positions.
                 open_trades = get_open_trades()
+                fractional_trades = [
+                    t for t in open_trades
+                    if not float(t["qty"]).is_integer()
+                ]
+                if not fractional_trades and not self._pending_closes:
+                    await asyncio.sleep(15)
+                    continue
+
+                positions = await self._get_broker_positions()
                 
                 broker_lookup = {p["symbol"]: p for p in positions}
                 

@@ -8,6 +8,7 @@ footprint minimal, and `websockets` for the real-time trade-update stream.
 import asyncio
 import json
 import logging
+import random
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
@@ -50,7 +51,7 @@ class AlpacaClient:
         
         for attempt in range(3):
             if self._session is None or self._session.is_closed:
-                self._session = httpx.AsyncClient(timeout=10.0)
+                self._session = httpx.AsyncClient(timeout=20.0)
                 
             try:
                 if method == "GET":
@@ -71,7 +72,8 @@ class AlpacaClient:
                     
                     # Retry on 5xx server errors
                     if resp.status_code >= 500 and attempt < 2:
-                        await asyncio.sleep(2 ** attempt)
+                        jitter = random.uniform(0.5, 1.5)
+                        await asyncio.sleep((2 ** attempt) * jitter)
                         continue
 
                     msg = f"Alpaca API {resp.status_code}: {resp.text}"
@@ -82,7 +84,8 @@ class AlpacaClient:
                 
             except httpx.RequestError as exc:
                 if attempt < 2:
-                    await asyncio.sleep(2 ** attempt)
+                    jitter = random.uniform(0.5, 1.5)
+                    await asyncio.sleep((2 ** attempt) * jitter)
                     continue
                 add_log("ERROR", f"HTTP {method} {path} failed after retries: {exc.__class__.__name__} - {exc}")
                 raise
