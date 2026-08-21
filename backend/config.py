@@ -34,14 +34,17 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "changeme")
 
 # ── Trading Safety Limits ─────────────────────────────────────────────────────
-MAX_DRAWDOWN_PCT       = 0.15   # Halt bot if daily equity drawdown exceeds 15%
-MAX_RISK_PER_TRADE_PCT = 0.02   # Risk at most 2% of equity per trade
-MAX_POSITION_SIZE_PCT  = 0.20   # Cap any single position to at most 20% of account equity
-DEFAULT_STOP_LOSS_PCT  = 0.02   # Fallback stop-loss: 2% below entry
-DEFAULT_TAKE_PROFIT_PCT = 0.06  # Fallback take-profit: 6% above entry (1:3 RRR)
-MAX_SECTOR_EXPOSURE_PCT = 0.40  # Max exposure per sector
-MAX_VIX_LEVEL          = 30.0   # Do not open new positions if VIX is above this level
-ALLOW_SHORT_SELLING    = os.getenv("ALLOW_SHORT_SELLING", "True").lower() in ("true", "1", "t", "yes")
+MAX_DRAWDOWN_PCT           = 0.15   # Halt bot if daily equity drawdown exceeds 15%
+MAX_RISK_PER_TRADE_PCT     = 0.02   # Risk at most 2% of equity per trade
+MAX_POSITION_SIZE_PCT      = 0.20   # Cap any single position to at most 20% of account equity
+DEFAULT_STOP_LOSS_PCT      = 0.02   # Fallback stop-loss: 2% below entry
+DEFAULT_TAKE_PROFIT_PCT     = 0.06  # Fallback take-profit: 6% above entry (1:3 RRR)
+MAX_STOP_LOSS_DISTANCE_PCT = 0.05   # Hard cap on stop loss distance (max 5% from entry)
+MAX_SECTOR_EXPOSURE_PCT     = 0.40  # Max exposure per sector
+MAX_VIX_LEVEL              = 30.0   # Do not open new positions if VIX is above this level
+ALLOW_SHORT_SELLING        = os.getenv("ALLOW_SHORT_SELLING", "True").lower() in ("true", "1", "t", "yes")
+STRATEGY_TIMEFRAME         = os.getenv("STRATEGY_TIMEFRAME", "1Hour")
+VOLUME_MULTIPLIER          = 1.1    # Minimum volume vs 20-period SMA for confirmation (110%)
 
 # ── Watchlist & Metadata ──────────────────────────────────────────────────────
 # Mapping of tickers to their Sector and Macro ETF for trend filtering

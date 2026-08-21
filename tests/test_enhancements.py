@@ -7,20 +7,20 @@ from backend.config import ALLOW_SHORT_SELLING, MAX_SECTOR_EXPOSURE_PCT, MAX_RIS
 def test_risk_manager_short_math():
     rm = RiskManager(starting_balance=10000)
     
-    # Short entry at 100, SL at 110. Risk is $10 per share.
-    # Total risk allowed = 10000 * 0.02 = 200.
-    # Qty = 200 / 10 = 20 shares.
-    qty = rm.calculate_position_size(entry_price=100, stop_loss_price=110, account_equity=10000)
+    # Short entry at 100, SL at 104 (4% risk). Risk is $4 per share.
+    # Total risk allowed = 10000 * 0.02 = 200 -> raw qty = 50 shares.
+    # Capped by MAX_POSITION_SIZE_PCT (20% of 10000 = $2000 -> 20 shares max).
+    qty = rm.calculate_position_size(entry_price=100, stop_loss_price=104, account_equity=10000)
     assert qty == 20.0
     
     # Validate a short order
-    # Entry 100, SL 110, TP 80
+    # Entry 100, SL 104, TP 90
     approved, msg = rm.validate_order(
         symbol="AAPL",
         qty=20,
         entry_price=100,
-        stop_loss_price=110,
-        take_profit_price=80,
+        stop_loss_price=104,
+        take_profit_price=90,
         free_cash=10000
     )
     assert approved == True
@@ -56,7 +56,7 @@ def test_risk_manager_sector_exposure():
             symbol="AMD",
             qty=20,
             entry_price=100,
-            stop_loss_price=90,
+            stop_loss_price=96,
             take_profit_price=None,
             free_cash=10000
         )
@@ -68,7 +68,7 @@ def test_risk_manager_sector_exposure():
             symbol="AMD",
             qty=5,
             entry_price=100,
-            stop_loss_price=90,
+            stop_loss_price=96,
             take_profit_price=None,
             free_cash=10000
         )

@@ -118,6 +118,7 @@ class RiskManager:
         stop_loss_price: Optional[float | Decimal | str],
         take_profit_price: Optional[float | Decimal | str],
         free_cash: float | Decimal | str,
+        side: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """
         Final gate-keeper before an order is sent to Alpaca.
@@ -146,16 +147,37 @@ class RiskManager:
         if stop_loss_price is None:
             return False, "Stop-loss is required for every entry. Order rejected."
 
-        # 4. Stop-loss logic (infer side from SL vs EP)
+        # 4. Stop-loss logic
         sl = Decimal(str(stop_loss_price))
         if sl == ep:
             return False, f"Stop-loss ({sl}) cannot equal entry ({ep})."
-            
-        is_short = sl > ep
+
+        tp = Decimal(str(take_profit_price)) if take_profit_price is not None else None
+
+        if side:
+            is_short = side.lower() in ("sell", "short")
+        elif tp is not None and tp > ep:
+            is_short = False
+        elif tp is not None and tp < ep:
+            is_short = True
+        else:
+            is_short = sl > ep
+
+        if not is_short and sl > ep:
+            return False, f"Stop-loss ({sl}) must be below entry ({ep}) for longs."
+        if is_short and sl < ep:
+            return False, f"Stop-loss ({sl}) must be above entry ({ep}) for shorts."
+
+        # Check max stop-loss distance (hard cap)
+        from backend.config import MAX_STOP_LOSS_DISTANCE_PCT
+        if MAX_STOP_LOSS_DISTANCE_PCT is not None:
+            max_dist_pct = Decimal(str(MAX_STOP_LOSS_DISTANCE_PCT)) + Decimal('0.005')
+            actual_dist_pct = abs(ep - sl) / ep
+            if actual_dist_pct > max_dist_pct:
+                return False, f"Stop-loss distance ({actual_dist_pct:.1%}) exceeds maximum limit of {MAX_STOP_LOSS_DISTANCE_PCT:.1%}."
 
         # 5. Take-profit must be logical
-        if take_profit_price is not None:
-            tp = Decimal(str(take_profit_price))
+        if tp is not None:
             if not is_short and tp <= ep:
                 return False, f"Take-profit ({tp}) must be above entry ({ep}) for longs."
             if is_short and tp >= ep:

@@ -146,11 +146,7 @@ class TradingBot:
                 # This avoids unnecessary API calls (and ReadTimeout errors)
                 # when the market is closed or there are no fractional positions.
                 open_trades = get_open_trades()
-                fractional_trades = [
-                    t for t in open_trades
-                    if not float(t["qty"]).is_integer()
-                ]
-                if not fractional_trades and not self._pending_closes:
+                if not open_trades and not self._pending_closes:
                     await asyncio.sleep(15)
                     continue
 
@@ -171,47 +167,110 @@ class TradingBot:
                         continue
                         
                     qty = float(trade["qty"])
-                    # Skip whole-number positions since they have an Alpaca SL attached
-                    if qty.is_integer():
-                        continue
                         
                     current_price = float(broker_lookup[symbol].get("current_price", 0))
                     stop_loss = trade.get("stop_loss")
                     activation_price = trade.get("activation_price")
                     trail_amount = trade.get("trail_amount")
                     take_profit = trade.get("take_profit") # for legacy trades
+                    trade_side = trade.get("side", "buy").lower()
                     
                     if stop_loss is None:
                         continue
-                        
-                    # Check if we hit the hard stop loss
-                    if current_price <= stop_loss:
-                        add_log("WARNING", f"📉 Soft SL triggered for {symbol} at {current_price} (SL: {stop_loss}).")
-                        await self._close_position(symbol)
-                        continue
-                        
-                    if take_profit and current_price >= take_profit:
-                        add_log("INFO", f"🎯 Soft TP triggered for {symbol} at {current_price} (TP: {take_profit}).")
-                        await self._close_position(symbol)
-                        continue
-                        
-                    # Check trailing activation
-                    if activation_price and current_price >= activation_price and trail_amount:
-                        new_sl = round(current_price - trail_amount, 2)
-                        if new_sl > stop_loss:
+                    if trade_side == "buy":
+                        # Check if we hit the hard stop loss (long)
+                        if current_price <= stop_loss:
+                            add_log("WARNING", f"📉 Soft SL triggered for {symbol} at {current_price} (SL: {stop_loss}).")
+                            await self._close_position(symbol)
+                            continue
+                            
+                        if take_profit and current_price >= take_profit:
+                            add_log("INFO", f"🎯 Soft TP triggered for {symbol} at {current_price} (TP: {take_profit}).")
+                            await self._close_position(symbol)
+                            continue
+
+                        # 1. Breakeven Stop Check (Price reached +1.0R gain)
+                        entry_price = float(trade.get("entry_price", 0))
+                        if trail_amount and entry_price > 0 and current_price >= (entry_price + trail_amount) and stop_loss < entry_price:
+                            new_sl = entry_price
                             update_trade_stop_loss(trade["id"], new_sl)
                             trade["stop_loss"] = new_sl
-                            add_log("INFO", f"📈 Trailing stop raised for {symbol}: {stop_loss} -> {new_sl}")
+                            add_log("INFO", f"🛡️ Breakeven stop locked in for {symbol}: SL moved to {new_sl}")
                             updated_sl = True
-                            
-                            # Attempt to update native broker order
                             try:
                                 orders = await self.client.get_orders(status="open")
-                                sl_order = next((o for o in orders if o["symbol"] == symbol and o["type"] == "stop"), None)
-                                if sl_order:
-                                    await self.client.replace_order(sl_order["id"], new_sl)
+                                if isinstance(orders, list):
+                                    sl_order = next((o for o in orders if isinstance(o, dict) and o.get("symbol") == symbol and o.get("type") == "stop"), None)
+                                    if sl_order:
+                                        await self.client.replace_order(sl_order["id"], new_sl)
                             except Exception as e:
                                 add_log("ERROR", f"Failed to replace native SL order for {symbol}: {e}")
+                            
+                        # 2. Check trailing activation (long)
+                        elif activation_price and current_price >= activation_price and trail_amount:
+                            new_sl = round(current_price - trail_amount, 2)
+                            if new_sl > stop_loss:
+                                update_trade_stop_loss(trade["id"], new_sl)
+                                trade["stop_loss"] = new_sl
+                                add_log("INFO", f"📈 Trailing stop raised for {symbol}: {stop_loss} -> {new_sl}")
+                                updated_sl = True
+                                
+                                # Attempt to update native broker order
+                                try:
+                                    orders = await self.client.get_orders(status="open")
+                                    if isinstance(orders, list):
+                                        sl_order = next((o for o in orders if isinstance(o, dict) and o.get("symbol") == symbol and o.get("type") == "stop"), None)
+                                        if sl_order:
+                                            await self.client.replace_order(sl_order["id"], new_sl)
+                                except Exception as e:
+                                    add_log("ERROR", f"Failed to replace native SL order for {symbol}: {e}")
+                    elif trade_side == "sell":
+                        # Check if we hit the hard stop loss (short)
+                        if current_price >= stop_loss:
+                            add_log("WARNING", f"📉 Soft SL triggered for short {symbol} at {current_price} (SL: {stop_loss}).")
+                            await self._close_position(symbol)
+                            continue
+                            
+                        if take_profit and current_price <= take_profit:
+                            add_log("INFO", f"🎯 Soft TP triggered for short {symbol} at {current_price} (TP: {take_profit}).")
+                            await self._close_position(symbol)
+                            continue
+
+                        # 1. Breakeven Stop Check (Price dropped +1.0R gain for short)
+                        entry_price = float(trade.get("entry_price", 0))
+                        if trail_amount and entry_price > 0 and current_price <= (entry_price - trail_amount) and stop_loss > entry_price:
+                            new_sl = entry_price
+                            update_trade_stop_loss(trade["id"], new_sl)
+                            trade["stop_loss"] = new_sl
+                            add_log("INFO", f"🛡️ Breakeven stop locked in for short {symbol}: SL moved to {new_sl}")
+                            updated_sl = True
+                            try:
+                                orders = await self.client.get_orders(status="open")
+                                if isinstance(orders, list):
+                                    sl_order = next((o for o in orders if isinstance(o, dict) and o.get("symbol") == symbol and o.get("type") == "stop"), None)
+                                    if sl_order:
+                                        await self.client.replace_order(sl_order["id"], new_sl)
+                            except Exception as e:
+                                add_log("ERROR", f"Failed to replace native SL order for short {symbol}: {e}")
+                            
+                        # 2. Check trailing activation (short: price drops below activation)
+                        elif activation_price and current_price <= activation_price and trail_amount:
+                            new_sl = round(current_price + trail_amount, 2)
+                            if new_sl < stop_loss:
+                                update_trade_stop_loss(trade["id"], new_sl)
+                                trade["stop_loss"] = new_sl
+                                add_log("INFO", f"📉 Trailing stop lowered for short {symbol}: {stop_loss} -> {new_sl}")
+                                updated_sl = True
+                                
+                                # Attempt to update native broker order
+                                try:
+                                    orders = await self.client.get_orders(status="open")
+                                    if isinstance(orders, list):
+                                        sl_order = next((o for o in orders if isinstance(o, dict) and o.get("symbol") == symbol and o.get("type") == "stop"), None)
+                                        if sl_order:
+                                            await self.client.replace_order(sl_order["id"], new_sl)
+                                except Exception as e:
+                                    add_log("ERROR", f"Failed to replace native SL order for short {symbol}: {e}")
                             
                 if updated_sl:
                     await self._get_broker_positions()
@@ -228,75 +287,71 @@ class TradingBot:
         """
         while self.running:
             try:
-                # Check if market is open — skip snapshot recording when closed
-                market_open = True
-                try:
-                    clock = await self.client.get_clock()
-                    market_open = clock.get("is_open", False)
-                except Exception as e:
-                    add_log("WARNING", f"Could not check market clock in equity monitor: {e}. Recording anyway.")
-
                 account = await self.client.get_account()
                 equity = float(account["equity"])
                 balance = float(account["cash"])
                 unrealized = float(account.get("unrealized_pl", 0))
 
-                if market_open:
-                    from backend.database import get_open_trades
-                    open_trades = get_open_trades()
-                    # Alpaca paper trading glitch: positions disappear, equity drops to cash balance
-                    if len(open_trades) > 0 and equity == balance:
-                        self._equity_glitch_count += 1
-                        # Log only the first occurrence and every 10th thereafter to avoid spam
-                        if self._equity_glitch_count == 1:
-                            add_log("WARNING", "Ignoring invalid Alpaca equity snapshot (paper trading glitch). Subsequent occurrences will be suppressed.")
-                        elif self._equity_glitch_count % 10 == 0:
-                            add_log("WARNING", f"Alpaca equity glitch still occurring (x{self._equity_glitch_count} times). Continuing to ignore.")
-                    else:
-                        if self._equity_glitch_count > 0:
-                            add_log("INFO", f"Alpaca equity glitch resolved after {self._equity_glitch_count} occurrence(s). Resuming normal snapshots.")
-                            self._equity_glitch_count = 0
-                        save_equity_snapshot(balance, equity, unrealized)
+                from backend.database import get_open_trades
+                open_trades = get_open_trades()
+                # Alpaca paper trading glitch: positions disappear, equity drops to cash balance
+                if len(open_trades) > 0 and equity == balance:
+                    self._equity_glitch_count += 1
+                    # Log only the first occurrence and every 10th thereafter to avoid spam
+                    if self._equity_glitch_count == 1 or self._equity_glitch_count % 10 == 0:
+                        add_log(
+                            "WARNING",
+                            f"Alpaca paper trading glitch detected: {len(open_trades)} open position(s) "
+                            f"in DB but account equity ($ {equity:,.2f}) equals cash balance. "
+                            f"Skipping equity snapshot (occurrence #{self._equity_glitch_count})."
+                        )
+                else:
+                    if self._equity_glitch_count > 0:
+                        add_log(
+                            "INFO",
+                            f"Alpaca equity recovered to $ {equity:,.2f} after "
+                            f"{self._equity_glitch_count} glitched snapshot(s)."
+                        )
+                        self._equity_glitch_count = 0
 
-                await self._emit("equity_update", {
-                    "equity": equity,
-                    "balance": balance,
-                    "unrealized_pnl": unrealized,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
+                    save_equity_snapshot(balance, equity, unrealized)
+                    await self._emit(
+                        "equity_update",
+                        {
+                            "equity": equity,
+                            "balance": balance,
+                            "unrealized_pnl": unrealized,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
 
-                # Circuit-breaker check
-                if self.risk_manager and not self.risk_manager.update_equity(equity):
-                    await self._emit("log", {
-                        "level": "CRITICAL",
-                        "message": "⛔ Daily drawdown limit hit – bot shutting down!",
-                    })
-                    await self.stop()
-                    return
+                # Update High Water Mark in RiskManager
+                if self.risk_manager:
+                    safe = self.risk_manager.update_equity(equity)
+                    if not safe:
+                        self.running = False
+                        add_log("CRITICAL", "Trading halted due to drawdown.")
+                        break
 
             except Exception as e:
-                add_log("ERROR", f"Equity monitor error: {type(e).__name__}: {e}")
+                add_log("ERROR", f"Equity monitor error: {e}")
 
             await asyncio.sleep(EQUITY_POLL_INTERVAL_SECONDS)
 
     async def _strategy_loop(self) -> None:
-        """
-        Evaluates the trading strategy for each symbol in the watchlist.
-        Runs once immediately on startup, then every STRATEGY_INTERVAL_SECONDS.
-        Skips evaluation when the market is closed to save API calls.
-        """
+        """Evaluates strategy every STRATEGY_INTERVAL_SECONDS."""
         while self.running:
             try:
-                # Check if market is open before scanning
+                # Check market open
                 try:
                     clock = await self.client.get_clock()
                     if not clock.get("is_open", False):
-                        next_open = clock.get("next_open", "unknown")
-                        logger.info(f"⏸ Market closed. Next open: {next_open}. Skipping scan.")
+                        logger.info("Market is closed. Skipping strategy evaluation.")
                         await asyncio.sleep(STRATEGY_INTERVAL_SECONDS)
                         continue
-                    else:
-                        # Skip the first 30 min post-open to avoid opening-bell noise.
+
+                    # 30-min market-open buffer
+                    if clock.get("is_open"):
                         # Alpaca's next_open refers to the *next* open when market is already
                         # open, so we infer time-since-open from (market_day - time_to_close).
                         next_close_str = clock.get("next_close")
@@ -340,7 +395,7 @@ class TradingBot:
         # Which symbols do we already hold a position in?
         open_positions = {p["symbol"] for p in await self._get_broker_positions()}
 
-        from backend.config import SYMBOL_METADATA, MAX_VIX_LEVEL
+        from backend.config import SYMBOL_METADATA, MAX_VIX_LEVEL, STRATEGY_TIMEFRAME
 
         # VIX check
         skip_new_entries = False
@@ -359,9 +414,9 @@ class TradingBot:
         macro_symbols = {SYMBOL_METADATA.get(sym, {}).get("macro", "SPY") for sym in self.watchlist}
         fetch_list = list(set(self.watchlist) | macro_symbols)
 
-        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="1Day", limit=251)
-        
-        # Note: forming day is dropped in _evaluate_symbol
+        # Multi-timeframe fetch: tactical bars (e.g. 1Hour) and macro daily bars (1Day)
+        bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe=STRATEGY_TIMEFRAME, limit=250)
+        daily_bars_dict = await self.client.get_historical_bars_multi(fetch_list, timeframe="1Day", limit=250)
 
         scan_results = []
         for symbol in self.watchlist:
@@ -370,8 +425,9 @@ class TradingBot:
             try:
                 bars = bars_dict.get(symbol, [])
                 macro_sym = SYMBOL_METADATA.get(symbol, {}).get("macro", "SPY")
-                market_bars = bars_dict.get(macro_sym, [])
-                res = await self._evaluate_symbol(symbol, bars, market_bars, equity, free_cash, open_positions, skip_new_entries)
+                market_bars = daily_bars_dict.get(macro_sym, [])
+                daily_bars = daily_bars_dict.get(symbol, [])
+                res = await self._evaluate_symbol(symbol, bars, market_bars, equity, free_cash, open_positions, skip_new_entries, daily_bars=daily_bars)
                 if res:
                     scan_results.append(res)
             except Exception as e:
@@ -390,6 +446,7 @@ class TradingBot:
         free_cash: float,
         open_positions: set,
         skip_new_entries: bool = False,
+        daily_bars: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """Evaluate one symbol and submit/skip as appropriate."""
         if not bars or len(bars) < 2:
@@ -397,8 +454,9 @@ class TradingBot:
             
         # Drop the current day's forming bar to prevent intraday repainting
         closed_bars = bars[:-1]
+        closed_daily_bars = daily_bars[:-1] if daily_bars and len(daily_bars) > 1 else daily_bars
 
-        result = self.strategy.generate_signal(closed_bars, market_bars)
+        result = self.strategy.generate_signal(closed_bars, market_bars=market_bars, daily_bars=closed_daily_bars)
         signal = result["signal"]
         reason = result["reason"]
         metrics = result.get("metrics")
@@ -555,7 +613,7 @@ class TradingBot:
                     side=side,
                     order_type="limit",
                     limit_price=limit_price,
-                    time_in_force="day",
+                    time_in_force="gtc",
                     stop_loss_price=stop_loss,
                     take_profit_price=tp,
                 )
@@ -566,7 +624,7 @@ class TradingBot:
                     side=side,
                     order_type="limit",
                     limit_price=limit_price,
-                    time_in_force="day",
+                    time_in_force="gtc",
                 )
             order_id = order.get("id")
 
@@ -626,17 +684,27 @@ class TradingBot:
             filled_price = float(event.get("price", 0))
             filled_qty = float(order.get("filled_qty", 0))
             side = order.get("side", "?")
+            position_intent = order.get("position_intent", "")
             add_log("INFO", f"🔔 Order FILLED: {side.upper()} {filled_qty} × {symbol} @ {filled_price}")
             await self._emit("position_update", await self._get_broker_positions())
 
-            if side.lower() == "buy":
-                # Update DB with actual fill price (replaces the estimate)
-                from backend.database import get_db_connection
-                conn = get_db_connection()
-                trade = conn.execute(
-                    "SELECT * FROM trades WHERE symbol = ? AND status = 'OPEN' ORDER BY id DESC LIMIT 1",
-                    (symbol,)
-                ).fetchone()
+            from backend.database import get_db_connection, update_trade_exit, update_trade_entry_price
+            conn = get_db_connection()
+
+            trade = conn.execute(
+                "SELECT * FROM trades WHERE symbol = ? AND status = 'OPEN' ORDER BY id DESC LIMIT 1",
+                (symbol,)
+            ).fetchone()
+
+            is_entry_fill = False
+            if trade and trade["alpaca_entry_order_id"] and trade["alpaca_entry_order_id"] == order_id:
+                is_entry_fill = True
+            elif position_intent in ("buy_to_open", "sell_to_open"):
+                is_entry_fill = True
+            elif not position_intent and trade and side.lower() == trade["side"].lower():
+                is_entry_fill = True
+
+            if is_entry_fill:
                 if trade:
                     update_trade_entry_price(trade["id"], filled_price)
                     add_log("INFO", f"Updated {symbol} entry price to actual fill: {filled_price}")
@@ -646,15 +714,15 @@ class TradingBot:
                 else:
                     add_log("INFO", f"Fractional order for {symbol}; tracking SL via software loop.")
             
-            elif side.lower() == "sell":
-                from backend.database import get_db_connection, update_trade_exit
-                conn = get_db_connection()
-                # We need to find the OPEN trade for this symbol to mark it closed
-                trade = conn.execute("SELECT * FROM trades WHERE symbol = ? AND status = 'OPEN'", (symbol,)).fetchone()
+            else:
                 if trade:
                     entry_price = float(trade["entry_price"])
                     qty = float(trade["qty"])
-                    pnl = (filled_price - entry_price) * qty
+                    trade_side = trade["side"].lower()
+                    if trade_side == "sell":
+                        pnl = (entry_price - filled_price) * qty
+                    else:
+                        pnl = (filled_price - entry_price) * qty
                     pnl_str = f"Gain: ${pnl:.2f}" if pnl >= 0 else f"Loss: ${abs(pnl):.2f}"
                     update_trade_exit(
                         trade_id=trade["id"],
@@ -662,7 +730,7 @@ class TradingBot:
                         pnl=pnl,
                         order_id=order_id
                     )
-                    add_log("INFO", f"Trade for {symbol} closed in DB. {pnl_str}")
+                    add_log("INFO", f"Trade for {symbol} ({trade_side.upper()}) closed in DB. {pnl_str}")
 
         elif ev_type in ("canceled", "expired"):
             add_log("WARNING", f"Order {order_id} for {symbol} was {ev_type}.")
@@ -697,36 +765,64 @@ class TradingBot:
                         "WARNING",
                         f"Adopting untracked broker position: {symbol} ({pos['qty']} shares).",
                     )
-                    adopted_side = "buy" if pos.get("side") == "long" else "sell"
+                    adopted_side = "sell" if pos.get("side") in ("short", "sell") else "buy"
 
                     # Try to recover SL/TP from open bracket-leg orders on Alpaca
                     stop_loss = None
                     take_profit = None
+                    activation_price = None
+                    trail_amount = None
                     try:
                         open_orders = await self.client.get_orders(status="open")
-                        for o in open_orders:
-                            if o.get("symbol") != symbol:
-                                continue
-                            order_type = o.get("type", "")
-                            order_side = o.get("side", "")
-                            # For a long position, SL is a sell stop; TP is a sell limit
-                            # For a short position, SL is a buy stop; TP is a buy limit
-                            if order_type == "stop" and o.get("stop_price"):
-                                stop_loss = float(o["stop_price"])
-                            elif order_type == "limit" and o.get("limit_price"):
-                                take_profit = float(o["limit_price"])
-                        if stop_loss or take_profit:
-                            add_log("INFO", f"Recovered orders for {symbol}: SL={stop_loss}, TP={take_profit}")
+                        if isinstance(open_orders, list):
+                            for o in open_orders:
+                                if not isinstance(o, dict) or o.get("symbol") != symbol:
+                                    continue
+                                order_type = o.get("type", "")
+                                order_side = o.get("side", "")
+                                # For a long position, SL is a sell stop; TP is a sell limit
+                                # For a short position, SL is a buy stop; TP is a buy limit
+                                if order_type == "stop" and o.get("stop_price"):
+                                    stop_loss = float(o["stop_price"])
+                                elif order_type == "limit" and o.get("limit_price"):
+                                    take_profit = float(o["limit_price"])
+                            if stop_loss or take_profit:
+                                add_log("INFO", f"Recovered orders for {symbol}: SL={stop_loss}, TP={take_profit}")
                     except Exception as e:
                         add_log("WARNING", f"Could not recover SL/TP orders for {symbol}: {e}")
+
+                    # Fallback SL/TP if no open bracket orders were found on Alpaca
+                    entry_p = float(pos.get("avg_entry_price", 0))
+                    if stop_loss is None and entry_p > 0:
+                        if self.risk_manager:
+                            def_sl, def_tp = self.risk_manager.default_levels(entry_p, side=adopted_side)
+                        else:
+                            from backend.config import DEFAULT_STOP_LOSS_PCT, DEFAULT_TAKE_PROFIT_PCT
+                            if adopted_side == "buy":
+                                def_sl = round(entry_p * (1 - DEFAULT_STOP_LOSS_PCT), 2)
+                                def_tp = round(entry_p * (1 + DEFAULT_TAKE_PROFIT_PCT), 2)
+                            else:
+                                def_sl = round(entry_p * (1 + DEFAULT_STOP_LOSS_PCT), 2)
+                                def_tp = round(entry_p * (1 - DEFAULT_TAKE_PROFIT_PCT), 2)
+                        stop_loss = def_sl
+                        take_profit = def_tp
+                        if adopted_side == "buy":
+                            activation_price = entry_p + (entry_p - stop_loss) * 2
+                            trail_amount = abs(entry_p - stop_loss)
+                        else:
+                            activation_price = entry_p - (stop_loss - entry_p) * 2
+                            trail_amount = abs(stop_loss - entry_p)
+                        add_log("INFO", f"Applied fallback SL/TP for adopted {symbol}: SL={stop_loss}, TP={take_profit}")
 
                     add_trade(
                         symbol=symbol,
                         qty=float(pos["qty"]),
                         side=adopted_side,
-                        entry_price=float(pos.get("avg_entry_price", 0)),
+                        entry_price=entry_p,
                         stop_loss=stop_loss,
                         take_profit=take_profit,
+                        activation_price=activation_price,
+                        trail_amount=trail_amount,
                         order_id="ADOPTED_ON_RECOVERY",
                     )
 
@@ -736,17 +832,22 @@ class TradingBot:
                     # Try to recover actual exit price from Alpaca order history
                     exit_price = 0.0
                     pnl = 0.0
+                    trade_side = trade["side"].lower()
                     try:
                         orders = await self.client.get_closed_orders(symbol, limit=5)
-                        sell_order = next(
-                            (o for o in orders if o.get("side") == "sell" and o.get("status") == "filled"),
+                        expected_exit_side = "sell" if trade_side == "buy" else "buy"
+                        exit_order = next(
+                            (o for o in orders if o.get("side") == expected_exit_side and o.get("status") == "filled"),
                             None,
                         )
-                        if sell_order:
-                            exit_price = float(sell_order.get("filled_avg_price", 0))
+                        if exit_order:
+                            exit_price = float(exit_order.get("filled_avg_price", 0))
                             entry_price = float(trade["entry_price"])
                             qty = float(trade["qty"])
-                            pnl = (exit_price - entry_price) * qty
+                            if trade_side == "sell":
+                                pnl = (entry_price - exit_price) * qty
+                            else:
+                                pnl = (exit_price - entry_price) * qty
                             pnl_str = f"Gain: ${pnl:.2f}" if pnl >= 0 else f"Loss: ${abs(pnl):.2f}"
                             add_log("INFO", f"Recovered exit price for {symbol}: ${exit_price:.2f}, {pnl_str}")
                     except Exception as e:

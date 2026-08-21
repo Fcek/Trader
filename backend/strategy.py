@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from backend.config import ALLOW_SHORT_SELLING
+from backend.config import ALLOW_SHORT_SELLING, MAX_STOP_LOSS_DISTANCE_PCT, VOLUME_MULTIPLIER
 
 logger = logging.getLogger("strategy")
 
@@ -38,7 +38,7 @@ class EMACrossStrategy(BaseStrategy):
     Entry  – bullish EMA cross (short EMA crosses above long EMA) while
              price is above the 200-day EMA (macro uptrend filter).
     Exit   – bearish EMA cross (short EMA crosses below long EMA).
-    SL/TP  – dynamically sized using ATR × risk_multiplier (default 2×)
+    SL/TP  – dynamically sized using ATR × risk_multiplier (capped at 5% max SL)
              with a 1:3 risk-reward ratio for take-profit.
     """
 
@@ -49,10 +49,11 @@ class EMACrossStrategy(BaseStrategy):
         trend_window: int = 200,
         atr_window: int = 14,
         volume_window: int = 20,
-        volume_multiplier: float = 0.8,
+        volume_multiplier: float = VOLUME_MULTIPLIER,
         rsi_window: int = 14,
         rsi_max: float = 75.0,
         risk_multiplier: float = 2.0,
+        max_stop_loss_pct: float = MAX_STOP_LOSS_DISTANCE_PCT,
     ) -> None:
         super().__init__("EMA_Cross")
         self.short_window = short_window
@@ -64,11 +65,13 @@ class EMACrossStrategy(BaseStrategy):
         self.rsi_window = rsi_window
         self.rsi_max = rsi_max
         self.risk_multiplier = risk_multiplier
+        self.max_stop_loss_pct = max_stop_loss_pct
 
     def generate_signal(
         self,
         bars: List[Dict[str, Any]],
         market_bars: Optional[List[Dict[str, Any]]] = None,
+        daily_bars: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         _hold = {"signal": "HOLD", "stop_loss": None, "activation_price": None, "trail_amount": None, "reason": "", "metrics": None}
 
@@ -115,7 +118,20 @@ class EMACrossStrategy(BaseStrategy):
         # ── Signal logic ─────────────────────────────────────────────────────
         bullish_cross = (prev["ema_s"] <= prev["ema_l"]) and (last["ema_s"] > last["ema_l"])
         bearish_cross = (prev["ema_s"] >= prev["ema_l"]) and (last["ema_s"] < last["ema_l"])
-        above_trend   = price > float(last["ema_t"])
+        
+        # Macro 200 EMA trend filter: use daily bars if provided, else fallback to bars ema_t
+        if daily_bars and len(daily_bars) >= self.trend_window:
+            ddf = pd.DataFrame(daily_bars)
+            ddf = ddf.rename(columns={"c": "close"})
+            ddf["close"] = pd.to_numeric(ddf["close"])
+            ddf["ema_t"] = ddf["close"].ewm(span=self.trend_window, adjust=False).mean()
+            daily_ema_t = float(ddf.iloc[-1]["ema_t"])
+            above_trend = price > daily_ema_t
+            below_trend = price < daily_ema_t
+        else:
+            above_trend = price > float(last["ema_t"])
+            below_trend = price < float(last["ema_t"])
+
         high_volume   = float(last["volume"]) > (float(last["vol_sma"]) * self.volume_multiplier)
         rsi_ok        = float(last["rsi"]) < self.rsi_max
 
@@ -145,7 +161,9 @@ class EMACrossStrategy(BaseStrategy):
         }
 
         if bullish_cross and above_trend and high_volume and rsi_ok and macro_ok:
-            risk_amount = round(atr * self.risk_multiplier, 2)
+            max_risk_amount = round(price * self.max_stop_loss_pct, 2)
+            raw_risk = round(atr * self.risk_multiplier, 2)
+            risk_amount = max(min(raw_risk, max_risk_amount), 0.01)
             sl = round(price - risk_amount, 2)
             activation = round(price + (risk_amount * 2), 2)
             return {
@@ -155,15 +173,16 @@ class EMACrossStrategy(BaseStrategy):
                 "trail_amount": risk_amount,
                 "reason": (
                     f"Bullish EMA{self.short_window}/{self.long_window} cross "
-                    f"above EMA{self.trend_window} with volume and RSI confirmation. Risk={risk_amount}, SL={sl}, Activate={activation}, Trail={risk_amount}"
+                    f"above EMA{self.trend_window} with volume ({self.volume_multiplier}x) and RSI confirmation. Risk={risk_amount}, SL={sl}, Activate={activation}, Trail={risk_amount}"
                 ),
                 "metrics": metrics
             }
 
-        below_trend = price < float(last["ema_t"])
         rsi_ok_short = float(last["rsi"]) > (100 - self.rsi_max)
         if bearish_cross and below_trend and high_volume and rsi_ok_short and macro_ok_short and ALLOW_SHORT_SELLING:
-            risk_amount = round(atr * self.risk_multiplier, 2)
+            max_risk_amount = round(price * self.max_stop_loss_pct, 2)
+            raw_risk = round(atr * self.risk_multiplier, 2)
+            risk_amount = max(min(raw_risk, max_risk_amount), 0.01)
             sl = round(price + risk_amount, 2)
             activation = round(price - (risk_amount * 2), 2)
             return {
@@ -173,7 +192,7 @@ class EMACrossStrategy(BaseStrategy):
                 "trail_amount": risk_amount,
                 "reason": (
                     f"Bearish EMA{self.short_window}/{self.long_window} cross "
-                    f"below EMA{self.trend_window} with volume and RSI confirmation. Risk={risk_amount}, SL={sl}, Activate={activation}, Trail={risk_amount}"
+                    f"below EMA{self.trend_window} with volume ({self.volume_multiplier}x) and RSI confirmation. Risk={risk_amount}, SL={sl}, Activate={activation}, Trail={risk_amount}"
                 ),
                 "metrics": metrics
             }

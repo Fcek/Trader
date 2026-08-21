@@ -198,3 +198,34 @@ def test_custom_windows_accepted():
 def test_strategy_name_is_ema_cross():
     strat = EMACrossStrategy()
     assert strat.name == "EMA_Cross"
+
+
+def test_max_stop_loss_cap_enforced():
+    """Ensure stop loss is capped at max_stop_loss_pct (5%) even with massive ATR."""
+    strat = EMACrossStrategy(rsi_max=100.0, max_stop_loss_pct=0.05)
+    # Build bars with massive volatility (large ATR)
+    bars = bullish_cross_bars()
+    # Modify latest bars to have huge high-low range
+    for b in bars[-15:]:
+        price = float(b["c"])
+        b["h"] = str(price * 1.5)  # 50% high range -> massive ATR
+        b["l"] = str(price * 0.5)  # 50% low range
+    
+    result = strat.generate_signal(bars)
+    if result["signal"] == "BUY":
+        price = float(bars[-1]["c"])
+        sl = result["stop_loss"]
+        # SL distance must not exceed 5% of price
+        assert (price - sl) / price <= 0.0501
+
+
+def test_daily_bars_macro_trend_filter():
+    """Ensure daily_bars 200 EMA overrides tactical trend when provided."""
+    strat = EMACrossStrategy(rsi_max=100.0)
+    bars = bullish_cross_bars()
+    # Daily bars showing macro downtrend (price < 200 EMA)
+    down_daily_bars = make_bars([200.0 - i * 0.5 for i in range(250)])
+    result = strat.generate_signal(bars, daily_bars=down_daily_bars)
+    # Should NOT buy because daily macro trend is down
+    assert result["signal"] != "BUY"
+
